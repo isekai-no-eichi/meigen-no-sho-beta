@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/meigen-no-sho-beta/app2/sw.js', { scope: '/meigen-no-sho-beta/app2/' })})}

@@ -1,0 +1,367 @@
+/* ============================================================
+   名言の書 v2 デザインシステム
+   色は4つだけ: 墨 / 羊皮紙 / 金 / 熾火。枠は ui2/ の9スライス素材。
+   （app/index.html v42 と a/index.html v42 から移植。見た目は変えない）
+   ============================================================ */
+:root{
+  --ink:#0b0806; --ink2:#1a130b; --paper:#e6d9bd; --paper2:#b8a98a;
+  --gold:#c9a24a; --gold2:#e9cf7e; --gold-dim:rgba(201,162,74,.42); --ember:#e0742a;
+  --serif:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --ui:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif;
+  --t-lg:clamp(20px,5.6vmin,28px); --t-md:clamp(14px,4.1vmin,17px); --t-sm:clamp(11px,3.1vmin,13px);
+}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;font-size:clamp(14px,4.1vmin,18px)}
+html,body{margin:0;overflow:hidden;overscroll-behavior:none;font-family:var(--serif);-webkit-tap-highlight-color:transparent;color:var(--paper);
+  background:var(--ink) center 40%/cover no-repeat;
+  height:100%;height:-webkit-fill-available;height:100dvh}
+#bgDim{position:fixed;inset:0;background:#000;opacity:0;transition:opacity 1.6s ease;pointer-events:none;z-index:1}
+#c{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none;z-index:2}
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
+  background:radial-gradient(ellipse 70% 62% at 50% 46%,transparent 40%,rgba(0,0,0,.35) 75%,rgba(0,0,0,.72) 100%)}
+/* G/E（2026-10-05）: 200%×200% → 118%（約1/3）。動く距離は旧と同じ画素量（旧 translate % × 2 を vw/vh で）。最大 8vw/8vh 動くので四辺 9% はみ出し（1% 余裕） */
+#grain{position:fixed;inset:-9%;width:118%;height:118%;pointer-events:none;z-index:4;opacity:.055;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  animation:grain 1.2s steps(6) infinite}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-6vw,4vh)}40%{transform:translate(4vw,-8vh)}60%{transform:translate(-8vw,-2vh)}80%{transform:translate(6vw,6vh)}100%{transform:translate(0,0)}}
+/* ?perf=0（旧動作） */
+.perf0 #grain{inset:-50%;width:200%;height:200%;animation-name:grain0}
+@keyframes grain0{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-4%)}60%{transform:translate(-4%,-1%)}80%{transform:translate(3%,3%)}100%{transform:translate(0,0)}}
+@media (prefers-reduced-motion:reduce){#grain{animation:none}}
+
+/* ---- 字幕（本の声）: 金の細字 ---- */
+#talk{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);
+  width:min(96vw,640px);box-sizing:border-box;padding:0 max(env(safe-area-inset-right,0px),env(safe-area-inset-left,0px));
+  text-align:center;z-index:8;opacity:0;transition:opacity .9s;pointer-events:none}
+#talk.show{opacity:1}
+#talk .txt{min-height:1.6em;white-space:nowrap;font-size:clamp(13px,3.6vmin,19px);line-height:1.7;letter-spacing:.06em;font-weight:500;color:var(--gold2);
+  text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8)}
+#talk.slow{transition:opacity 2.6s ease}
+/* 2026-09-30 KEI「『2回タップ〜』以外は画面に文字を出なくていい」: 本の画面の状況の文は出さない */
+#talk{display:none}
+
+/* ---- 最初の一言（表示から5秒後・細い金の罫線1本＋一文） ---- */
+/* 2026-09-30 KEI: 本の上に重ねず、本と下のボタン列のあいだへ。元の位置に戻す時は 66 → 44 に（この1か所） */
+#hint{position:fixed;left:50%;top:66%;top:66dvh;transform:translate(-50%,-50%);display:flex;flex-direction:column-reverse;z-index:9;pointer-events:none;text-align:center;
+  opacity:0;transition:opacity 1.6s ease}
+#hint.show{opacity:1}
+/* 横向きの入口（2026-09-26 QA D13）: 案内だけ出し、ボタンと「2回タップ」の文字は隠す。読書画面は対象外 */
+#landMsg{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:8;pointer-events:none;white-space:nowrap;
+  font-family:var(--serif);font-size:clamp(14px,4vmin,19px);letter-spacing:.26em;text-indent:.26em;color:var(--gold2);
+  text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8)}
+body.land-block.stage-book #landMsg{display:block}
+body.land-block.stage-book #ui,body.land-block.stage-book #hint{visibility:hidden;pointer-events:none}
+/* 本を開く時だけ、すっと消す（2026-09-17 KEI: 消えたあと1秒の間をおいて「名言の書」が出る） */
+#hint.bye{transition:opacity .6s ease}
+#hint .rule{width:min(46vw,260px);height:1px;margin:14px auto 0;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+#hint .txt{font-family:var(--serif);font-size:clamp(14px,4vmin,19px);letter-spacing:.26em;text-indent:.26em;font-weight:400;color:var(--gold2);
+  white-space:nowrap;text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8)}
+
+/* ---- 枠（唯一の部品）: ChatGPT生成の革と真鍮の9スライス ---- */
+.frame{position:relative;border:28px solid transparent;border-image:url(../assets/ui2/panel.webp) 92 fill / 28px stretch;box-shadow:0 16px 40px rgba(0,0,0,.75)}
+.box::-webkit-scrollbar{display:none}
+
+/* ---- 1タップで出る周りのUI: 右上「メニュー」1つだけ ---- */
+/* 本の画面の下段UI（2026-09-10 KEI: 縦1列。上から しおりから読む／お気に入りを読む／この本の説明） */
+#ui{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 18px);z-index:7;
+  display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;opacity:0;transition:opacity .9s}
+#ui.show{opacity:1}
+#ui.show .ico,#ui.show .seal{pointer-events:auto}
+.seal{font-family:var(--serif);font-size:clamp(15px,4.5vmin,18px);letter-spacing:.42em;text-indent:.42em;color:var(--gold2);white-space:nowrap;cursor:pointer;
+  width:284px;box-sizing:border-box;padding:8px 0;background:none;border:14px solid transparent;border-image:url(../assets/ui2/button.webp) 70 fill / 14px stretch;filter:drop-shadow(0 10px 22px rgba(0,0,0,.7));
+  transition:transform .18s ease,color .18s}
+.seal:active{transform:translateY(1px) scale(.985);color:#fff2c4}
+/* 縦1列の入口ボタン（2026-09-10 KEI）。3つとも同じ幅・同じ高さ。
+   栞／印が無い行は hidden で消え、列は中央・下端そろえのまま残る */
+.seal.wide{flex:0 0 auto;width:min(78vw,320px);height:48px;min-width:0;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  font-size:clamp(13px,3.6vw,16px);letter-spacing:.08em;text-indent:.08em;
+  border-width:10px;border-image-width:10px}
+.seal[hidden]{display:none}
+/* 「栞から読む」｜「栞を外す」を1行に左右で並べる（2026-09-30 KEI: 下のUIの圧迫を減らす）。幅は他の行と同じ */
+.bmrow{display:flex;gap:10px;width:min(78vw,320px);flex:0 0 auto}
+.bmrow[hidden]{display:none}
+.bmrow .seal.wide{flex:1 1 0;width:auto;letter-spacing:.04em;text-indent:.04em}
+/* 枠・札の画像（panel / button / small）が読み終わるまで、それを使う要素は描かない。
+   文字だけ先に出て、枠が遅れて出るのを防ぐ（2026-09-30 KEI）。ui/Ui.ts の preloadUiImages が body.uiimg を付ける */
+body:not(.uiimg) #ui,body:not(.uiimg) #menu .frame,body:not(.uiimg) #favBtn,body:not(.uiimg) #favListBtn,body:not(.uiimg) #setBtn{visibility:hidden}
+/* 説明パネルは文字と枠を一緒にふわっと出す */
+#menu.show .frame{animation:frameIn .28s ease-out}
+@keyframes frameIn{from{opacity:0}to{opacity:1}}
+.ico.off{opacity:.55}
+.ico{font-family:var(--ui);font-size:var(--t-sm);letter-spacing:.22em;text-indent:.22em;color:var(--paper2);white-space:nowrap;cursor:pointer;
+  width:88px;height:72px;box-sizing:border-box;padding:0;background:url(../assets/ui2/small.png) center/100% 100% no-repeat;border:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  filter:drop-shadow(0 8px 16px rgba(0,0,0,.6));transition:color .18s,transform .18s}
+.ico:active{color:var(--gold2);transform:translateY(1px);filter:brightness(1.25) drop-shadow(0 6px 12px rgba(0,0,0,.6))}
+.ico b{display:block;font-family:var(--serif);font-size:clamp(15px,4vmin,17px);letter-spacing:0;text-indent:0;margin-bottom:3px;color:var(--gold);font-weight:normal;height:18px;line-height:18px}
+
+/* ---- ホーム画面に追加のヒント（1回だけ・スタンドアロンでない時のみ） ---- */
+#a2hs{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 10px);
+  z-index:8;display:flex;visibility:hidden;pointer-events:none;align-items:center;gap:10px;max-width:min(94vw,560px);box-sizing:border-box;
+  padding:7px 12px;background:rgba(5,3,1,.62);border:1px solid rgba(201,162,74,.28);
+  font-family:var(--ui);font-size:var(--t-sm);line-height:1.5;letter-spacing:.06em;color:var(--paper2);
+  opacity:0;transition:opacity .8s ease}
+#a2hs.show{visibility:visible;opacity:1;pointer-events:auto}
+#a2hs span{flex:1}
+#a2hs button{flex:none;background:none;border:none;color:var(--gold);font-family:var(--ui);font-size:var(--t-sm);line-height:1;padding:4px 2px;cursor:pointer}
+
+/* ---- メニューパネル（画面中央に1枚） ---- */
+.ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:40;background:rgba(5,3,1,.72);backdrop-filter:blur(2px)}
+.ov.show{display:flex}
+.box{width:min(88vw,410px);max-height:86vh;max-height:86dvh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;box-sizing:border-box;color:var(--paper);padding:6px 6px 4px}
+.box h2{font-family:var(--serif);font-size:18px;letter-spacing:.45em;text-indent:.45em;margin:0 0 6px;font-weight:500;text-align:center;color:var(--gold2)}
+.box .rule{width:144px;height:16px;margin:4px auto 10px;background:url(../assets/ui2/divider.png) center/contain no-repeat}
+.box p{font-size:var(--t-md);line-height:1.85;letter-spacing:.04em;margin:0 0 7px;color:var(--paper)}   /* 1文=1行（「。」で改行） */
+.box p.h{font-family:var(--ui);font-size:var(--t-sm);letter-spacing:.3em;text-indent:.3em;text-align:center;color:var(--gold);margin:0 0 10px}
+.pnav{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:8px}
+.pnav .dots{margin:0}
+.box hr{border:none;border-top:1px solid rgba(201,162,74,.22);margin:10px 0 9px}
+.box .close{display:block;margin:12px auto 2px;background:none;border:1px solid rgba(201,162,74,.45);color:var(--gold2);padding:8px 30px;letter-spacing:.4em;text-indent:.4em;font-family:var(--serif);cursor:pointer}
+.mode{display:flex;flex-direction:column;align-items:flex-start;width:100%;box-sizing:border-box;margin:0 0 7px;padding:9px 13px;
+  color:var(--paper);background:rgba(0,0,0,.28);border:1px solid rgba(201,162,74,.3);font-family:var(--serif);font-size:14px;letter-spacing:.2em;cursor:pointer;text-align:left}
+.mode span{font-family:var(--ui);font-size:11px;letter-spacing:.08em;color:var(--paper2);margin-top:3px}
+.mode:active{color:#fff2c4;border-color:var(--gold)}
+
+.tabs{display:flex;align-items:center;justify-content:center;gap:10px}
+.tabs h2{margin:0;min-width:9em}
+.tarrow{background:none;border:1px solid rgba(201,162,74,.35);color:var(--gold);width:30px;height:30px;font-family:var(--serif);font-size:18px;line-height:1;cursor:pointer}
+.tarrow:active{color:#fff2c4;border-color:var(--gold)}
+.tabbody{height:auto;max-height:52vh;max-height:52dvh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-right:0}
+.tabbody::-webkit-scrollbar{display:none}
+.tab p{min-height:0;white-space:normal;word-break:normal;font-size:15px;letter-spacing:.02em;line-height:1.8;margin:0 0 12px}
+.tab p:last-child{margin-bottom:0}
+.tab p.h{color:var(--gold);letter-spacing:.2em;margin:14px 0 6px;font-size:clamp(11.5px,3.3vw,13.5px)}
+.dots{display:flex;justify-content:center;gap:8px;margin:10px 0 0}
+.dots i{width:6px;height:6px;border:1px solid var(--gold);transform:rotate(45deg);opacity:.45}
+.dots i.on{background:var(--gold);opacity:1}
+#menuActs{margin-top:12px}
+/* ============================================================
+   「この本について」= 黒革のパネル（2026-09-17 v4 KEI「最初の黒革に戻す」）
+   枠は .frame（assets/ui2/panel.webp の9スライス）をそのまま使う。
+   紙テクスチャ・透かし・罫線は外した（letter-paper.jpg / letter-mark.png は残置・未参照）。
+   読みやすさ優先で、v3 の大きめの文字と広い行間・余白はそのまま引き継ぐ。
+   文章の差し替えは src/ui/Ui.ts の data-tab="0..2" の <p> だけ触ればよい。
+   ============================================================ */
+/* v5（2026-09-17 KEI「画面いっぱいに広がらないで。3ページとも同じ形で」）:
+   高さは画面の約68%で固定。3ページとも同じ枠の大きさになり、
+   はみ出した本文は .lbody の中だけが縦に流れる（ボタン列は下辺に固定）。 */
+#menu .box.letter{
+  position:relative;width:min(calc(100vw - 22px),440px);
+  height:min(68vh,600px);height:min(68dvh,600px);max-height:none;
+  padding:0;display:flex;flex-direction:column;
+  color:var(--paper);background:none;border-radius:0}
+#menu .box.letter.frame{border-width:22px;border-image-width:22px}
+#menu .lwrap{position:relative;flex:1 1 auto;min-height:0;display:flex}
+#menu .lbody{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  padding:6px 8px 4px}
+#menu .lbody::-webkit-scrollbar{display:none}
+/* 続きがある側だけ、本文が黒革に沈む影（2026-09-17 v8 KEI）。高さ=本文3行ぶん */
+#menu .lfade{position:absolute;left:0;right:0;height:calc(2.1em * 3);pointer-events:none;z-index:2;
+  font-size:clamp(14.5px,4.1vmin,17px);opacity:0;transition:opacity .2s ease}
+#menu .lfade.show{opacity:1}
+#menu .lfade.bot{bottom:0;background:linear-gradient(to bottom,rgba(16,11,7,0) 0%,rgba(16,11,7,.55) 52%,rgba(16,11,7,.94) 100%)}
+#menu .lfade.top{top:0;background:linear-gradient(to top,rgba(16,11,7,0) 0%,rgba(16,11,7,.50) 52%,rgba(16,11,7,.90) 100%)}
+/* 本文（黒革の上・羊皮紙色の文字） */
+#menu .box.letter .tab p{color:var(--paper);font-family:var(--serif);font-size:clamp(14.5px,4.1vmin,17px);line-height:2.1;letter-spacing:.05em;
+  margin:0 0 1.5em;white-space:normal;word-break:normal;min-height:0;text-shadow:0 1px 2px rgba(0,0,0,.55)}
+/* UIボタン名【…】は途中で折り返さない */
+#menu .box.letter .tab .k{white-space:nowrap;color:var(--gold2)}
+#menu .box.letter .tab p.h{color:var(--gold2);letter-spacing:.34em;text-indent:.34em;text-align:center;
+  font-size:clamp(14px,4vmin,16.5px);margin:2px 0 1.3em;
+  padding-bottom:12px;border-bottom:1px solid rgba(201,162,74,.28)}
+#menu .box.letter .tab p.last{margin-bottom:.8em}
+#menu .lnav{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 6px 2px;
+  border-top:1px solid rgba(201,162,74,.22)}
+#menu .lbtn{font-family:var(--serif);font-size:clamp(12.5px,3.6vmin,14.5px);letter-spacing:.1em;color:var(--gold2);background:rgba(0,0,0,.28);
+  border:1px solid rgba(201,162,74,.45);padding:9px 14px;cursor:pointer;border-radius:1px}
+#menu .lbtn:active{color:#fff2c4;border-color:rgba(201,162,74,.9);background:rgba(201,162,74,.14)}
+#menu .lnum{font-family:var(--ui);font-size:clamp(11px,3vmin,12px);letter-spacing:.12em;color:var(--paper2)}
+#menu .lclose{flex:none;display:block;margin:10px auto 4px;background:rgba(0,0,0,.28);border:1px solid rgba(201,162,74,.45);color:var(--gold2);
+  padding:10px 32px;letter-spacing:.3em;text-indent:.3em;font-family:var(--serif);font-size:clamp(12.5px,3.6vmin,14.5px);cursor:pointer;border-radius:1px}
+#menu .lclose:active{color:#fff2c4;background:rgba(201,162,74,.14)}
+/* ?stats の時だけ出す訪問回数（ふだんは出ない・2026-09-17） */
+#hits{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 4px);z-index:7;text-align:center;pointer-events:none;
+  font-family:var(--ui);font-size:clamp(10px,2.8vmin,12px);letter-spacing:.14em;color:var(--paper2);opacity:0;transition:opacity 1.2s ease;
+  text-shadow:0 1px 3px #000}
+#hits.show{opacity:.72}
+
+/* ---- 開く演出 ---- */
+#readTitle{position:fixed;left:0;right:0;top:36%;text-align:center;pointer-events:none;z-index:21;font-family:var(--serif);color:var(--gold2);
+  opacity:0;filter:blur(14px);transition:opacity 1.2s ease,filter 1.2s ease}
+#readTitle .main{font-size:min(11vw,64px);font-weight:500;letter-spacing:.3em;text-indent:.3em;white-space:nowrap;text-shadow:0 0 26px rgba(233,207,126,.55),0 2px 12px rgba(0,0,0,.9)}
+#readTitle .rule{width:min(56vw,330px);height:1px;margin:14px auto;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+#readTitle.show{opacity:1;filter:blur(0)}
+/* 開く時のタイトルカード「名言の書」（2026-09-13 KEI 復活。旧 app/ v8 と同じ見せ方） */
+#readTitle{position:fixed;left:0;right:0;top:36%;text-align:center;pointer-events:none;z-index:21;font-family:var(--serif);color:var(--gold2);
+  opacity:0;filter:blur(14px);transition:opacity 1.2s ease,filter 1.2s ease}
+#readTitle .main{font-size:min(11vw,64px);font-weight:500;letter-spacing:.3em;text-indent:.3em;white-space:nowrap;text-shadow:0 0 26px rgba(233,207,126,.55),0 2px 12px rgba(0,0,0,.9)}
+#readTitle .rule{width:min(56vw,330px);height:1px;margin:14px auto;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+#readTitle.show{opacity:1;filter:blur(0)}
+#fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 1.1s ease-in;z-index:30}
+/* 開く瞬間に溢れる光（暗転のかわり。白飛びさせず、一瞬で引く） */
+#flash{position:fixed;inset:0;pointer-events:none;z-index:31;opacity:0;mix-blend-mode:screen;
+  background:radial-gradient(ellipse 78% 62% at 50% 52%,rgba(255,238,200,.92),rgba(255,196,120,.42) 45%,rgba(255,150,60,.10) 70%,transparent 88%)}
+
+/* ============================================================
+   読書レイヤー（旧 a/index.html。iframe をやめ、同一ページの全画面レイヤーに）
+   ============================================================ */
+#reader{position:fixed;inset:0;z-index:25;opacity:0;pointer-events:none;transition:opacity 1.2s ease;visibility:hidden}
+#reader.matchcut{transition:opacity .45s ease}
+#reader.show{opacity:1;pointer-events:auto;visibility:visible}
+#reader #bg{position:absolute;inset:0;background:#000 center 45%/cover no-repeat;filter:brightness(.95) saturate(1);z-index:0}
+#reader.show #bg{background-image:url(../assets/hall-bg.jpg)}   /* 読書に入るまで書斎の絵は落とさない */
+/* 開く直前の3D画面のスクショを、暗くぼかして紙の後ろに敷く（マッチカット・KEI 2026-09-07） */
+#reader #bg.snap{filter:blur(9px);opacity:.62;transform:scale(1.08)}
+#reader #bg.snap::after{background:none}
+#reader #bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.55) 100%)}
+/* 栞（羊皮紙のタブ＋麻紐。本に挟まり、上端のマークだけが紙の上端から覗く） */
+#ribbon{position:fixed;z-index:1;pointer-events:none;opacity:0;
+  background:url(bookmark.webp) center top/100% auto no-repeat;
+  filter:drop-shadow(0 4px 9px rgba(0,0,0,.66)) brightness(.96) saturate(.96);
+  transition:top .5s cubic-bezier(.32,0,.18,1),opacity .3s ease;
+  transform-origin:50% 24%}
+#ribbon.show{opacity:1}
+#ribbon.soft{transition:opacity 1.1s ease}   /* 栞のページへ戻った時は、じゅわっと現れる */
+#ribbon.sway{animation:ribbonSway 7s ease-in-out infinite alternate}
+@keyframes ribbonSway{from{transform:rotate(-.55deg)}to{transform:rotate(.55deg)}}
+/* 読んでいる間はUIを闇へ溶かす（2.5秒操作なし）。画面の下側に触れれば戻る */
+#reader.uihide #favBtn,#reader.uihide #favListBtn,#reader.uihide #setBtn,#reader.uihide #seen,#reader.uihide #backBtn{opacity:0 !important;transition:opacity 1.6s ease}
+/* 本に潜った直後の夜明け（約6.8秒）は、ボタンを描かない（2026-09-30 KEI: 「音」が一瞬映るちらつき） */
+#reader.dawning #favBtn,#reader.dawning #favListBtn,#reader.dawning #setBtn,#reader.dawning #seen,#reader.dawning #backBtn{visibility:hidden !important}
+/* 紙は机の上の「物」。全体をわずかに傾け、接地影を足す（KEI 2026-09-07 Phase 4）。
+   当たり判定は傾けない座標系のまま（横方向のドラッグ量で決まるので 2.2° では実質ずれない）。 */
+#book{--tilt:0deg;position:fixed;left:50%;top:46%;transform:translate(-50%,-50%) scale(.97) rotate(var(--tilt));z-index:2;
+  box-shadow:0 4px 10px rgba(0,0,0,.7),0 30px 60px rgba(0,0,0,.85),0 64px 120px rgba(0,0,0,.55),0 2px 0 rgba(0,0,0,.6),0 0 0 1px rgba(60,44,22,.6);
+  border-radius:2px;touch-action:none;opacity:0;filter:blur(14px) brightness(2.1);transition:opacity 1.5s ease,transform 1.5s ease,filter 1.8s ease}
+#book.in{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(var(--tilt));filter:blur(0) brightness(1)}
+/* マッチカット: 紙は同じ位置・同じ明るさからそのまま現れる（ぼかしも増光もしない） */
+#reader.matchcut #book{filter:none;transform:translate(-50%,-50%) scale(1) rotate(var(--tilt));transition:opacity .5s ease}
+#book.sway{top:46%;animation:swayK 9s ease-in-out infinite alternate}
+@keyframes swayK{
+  from{transform:translate(-50%,-50%) scale(1) rotate(calc(var(--tilt) - .35deg))}
+  to{transform:translate(-50%,-50.4%) scale(1.004) rotate(calc(var(--tilt) + .35deg))}}
+#book.out{opacity:0 !important;transform:translate(-50%,-49%) scale(.94) rotate(var(--tilt)) !important;filter:blur(5px) brightness(.35) !important;animation:none !important;
+  transition:opacity 1.4s cubic-bezier(.6,0,.9,.6),transform 1.4s cubic-bezier(.6,0,.9,.6),filter 1.4s cubic-bezier(.6,0,.9,.6) !important}
+#paperGlow{position:fixed;left:50%;top:54%;width:130vmin;height:110vmin;transform:translate(-50%,-50%);pointer-events:none;
+  mix-blend-mode:overlay;z-index:4;opacity:0;transition:opacity 1.2s ease,transform 1.6s ease;
+  background:radial-gradient(ellipse 46% 40% at 50% 52%,rgba(255,196,110,.85),rgba(255,170,80,.25) 55%,transparent 75%)}
+#candle{display:none;position:fixed;inset:0;pointer-events:none;mix-blend-mode:overlay;z-index:5;
+  background:radial-gradient(ellipse 72% 58% at 50% 42%,rgba(255,176,88,.85),rgba(255,140,60,.25) 55%,transparent 75%)}
+#shade{position:fixed;inset:-12%;pointer-events:none;z-index:6;
+  background:radial-gradient(ellipse 70% 62% at 56% 50%,transparent 44%,rgba(0,0,0,.20) 74%,rgba(0,0,0,.50) 100%);transition:none}
+#dust{position:fixed;inset:0;pointer-events:none;z-index:26}
+#flameWrap{display:none;position:fixed;right:9%;bottom:6%;width:22px;height:120px;pointer-events:none;z-index:27;transform-origin:50% 100%}
+#wick{position:absolute;left:50%;bottom:0;width:4px;height:14px;margin-left:-2px;background:linear-gradient(#1a120a,#3a2a18);border-radius:2px}
+#flame{position:absolute;left:50%;bottom:10px;width:22px;height:54px;margin-left:-11px;transform-origin:50% 100%;
+  border-radius:50% 50% 45% 45% / 70% 70% 30% 30%;
+  background:radial-gradient(ellipse at 50% 80%,#fff8dc 0%,#ffd16a 25%,#ff8a1e 55%,rgba(255,80,0,.55) 78%,transparent 100%);
+  filter:blur(.6px);box-shadow:0 0 18px 6px rgba(255,150,60,.55),0 0 60px 22px rgba(255,120,40,.28)}
+#flameCore{position:absolute;left:50%;bottom:12px;width:8px;height:20px;margin-left:-4px;border-radius:50%;background:radial-gradient(#5aa8ff55,transparent 70%)}
+#candleImg{position:fixed;right:calc(env(safe-area-inset-right,0px) - 3vw);bottom:calc(env(safe-area-inset-bottom,0px) - 1.5vh);width:min(34vmin,200px);pointer-events:none;z-index:8;opacity:0;transition:opacity 2s ease}
+  /* candle.webp は透過画像（2026-09-07 黒背景+screen合成を廃止。iOSで mask+blend が効かず黒い枠が出たため） */
+#candleImg.on{opacity:.95}
+#flameGlow{position:fixed;pointer-events:none;z-index:9;width:16vmin;height:16vmin;margin:-8vmin 0 0 -8vmin;mix-blend-mode:screen;opacity:0;
+  background:radial-gradient(circle at 50% 55%,rgba(255,232,170,.95) 0%,rgba(255,180,90,.55) 18%,rgba(255,130,50,.18) 42%,transparent 66%);filter:blur(1.5px)}
+#halo{position:fixed;right:0;bottom:0;width:120vmin;height:120vmin;pointer-events:none;z-index:7;mix-blend-mode:screen;
+  transform:translate(35%,40%);background:radial-gradient(circle at 50% 50%,rgba(255,170,80,.30),rgba(255,120,40,.12) 35%,transparent 62%)}
+#veil{position:fixed;inset:0;pointer-events:none;z-index:23;background:#000;opacity:0}
+
+/* ---- 読書画面の下ボタン列（栞／音／印）と 戻る・N枚目 ---- */
+#favBtn,#favListBtn,#setBtn{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 1.2vh);bottom:calc(env(safe-area-inset-bottom,0px) + 1.2dvh);z-index:27;width:104px;box-sizing:border-box;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--ui);font-size:clamp(11px,3.1vmin,13px);letter-spacing:.2em;text-indent:.2em;
+  color:#b8a98a;background:url(../assets/ui2/small.png) center/100% 100% no-repeat;border:none;height:80px;padding:0;cursor:pointer;user-select:none;opacity:0;transition:opacity 1s,color .18s;filter:drop-shadow(0 8px 16px rgba(0,0,0,.6))}
+#favBtn b,#favListBtn b,#setBtn b{display:block;font-family:serif;font-size:clamp(15px,4vmin,17px);letter-spacing:0;text-indent:0;margin-bottom:3px;color:#c9a24a;font-weight:normal;height:18px;line-height:18px}
+#favListBtn b svg,#setBtn b svg{vertical-align:top}
+/* 栞／音／お気に入りの3つを中央に並べ直す（2026-09-09 KEI: 全画面の札を撤去） */
+#favListBtn{left:calc(50% - 160px)}
+#setBtn{left:calc(50% - 52px);display:none}
+#setBtn.show{display:flex}
+#favBtn{left:calc(50% + 56px)}
+#favBtn.show,#favListBtn.show,#setBtn.show{opacity:.92;pointer-events:auto}
+#setBtn.show.off{opacity:.6}
+#seen{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);right:calc(env(safe-area-inset-right,0px) + 16px);z-index:27;color:#b8a98a;font-family:var(--ui);font-size:clamp(11px,3.1vmin,13px);letter-spacing:.18em;opacity:0;transition:opacity 1s;pointer-events:none;text-shadow:0 1px 3px #000}
+#seen.show{opacity:.85}
+#seen b{font-weight:normal;font-family:serif;font-size:18px;letter-spacing:.05em;margin-right:.25em;color:#c9a24a}
+#backBtn{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:calc(env(safe-area-inset-left,0px) + 14px);z-index:27;display:none;color:#b8a98a;font-family:var(--ui);font-size:clamp(11px,3.1vmin,13px);letter-spacing:.2em;
+  padding:7px 12px;background:rgba(11,8,6,.6);border:1px solid rgba(201,162,74,.22);cursor:pointer;opacity:0;transition:opacity 1s}
+#backBtn.show{display:block;opacity:.9}
+#favBtn.on,#favListBtn.on{color:#e9cf7e;filter:drop-shadow(0 8px 16px rgba(0,0,0,.6)) brightness(1.35)}
+#favListBtn.on b svg{fill:#c9a24a;stroke:#e9cf7e}
+#favBtn.on b{color:#e9cf7e}
+#toast{position:fixed;left:50%;top:35%;transform:translate(-50%,-50%);z-index:28;pointer-events:none;text-align:center;white-space:nowrap;
+  font-family:var(--serif);font-size:clamp(15px,4.2vmin,21px);letter-spacing:.14em;color:#e9cf7e;text-shadow:0 0 18px rgba(233,207,126,.55),0 2px 10px rgba(0,0,0,.9);
+  opacity:0;filter:blur(10px);transition:opacity .5s ease,filter .5s ease}
+#toast.show{opacity:1;filter:blur(0)}
+#toast.hide{opacity:0;filter:blur(8px);transition:opacity 1.1s ease,filter 1.1s ease}
+/* 読み込み中（2026-09-26 QA D14）: ページ画像が届くまでだけ。本の書体で控えめに。0.4秒以内に届けば出ない */
+#rload{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:27;pointer-events:none;white-space:nowrap;
+  font-family:var(--serif);font-size:clamp(12px,3.4vmin,15px);letter-spacing:.3em;text-indent:.3em;color:rgba(233,207,126,.72);
+  text-shadow:0 2px 10px rgba(0,0,0,.9);opacity:0;transition:opacity .6s ease}
+#rload.show{opacity:1;transition-delay:.4s}
+#favPanel{position:fixed;inset:0;z-index:29;display:none;background:rgba(5,3,1,.85);align-items:center;justify-content:center}
+#favPanel .box{max-height:76vh;overflow:auto;background:#161009;border:1px solid rgba(216,207,188,.4);padding:22px;color:#d8cfbc;font-family:serif;min-width:min(80vw,340px)}
+#favPanel h2{font-size:14px;letter-spacing:.4em;text-indent:.4em;text-align:center;margin:0 0 16px;font-weight:normal}
+#favPanel .empty{font-size:13px;letter-spacing:.2em;text-align:center;padding:18px 6px;color:#a99e88}
+#favPanel .close{display:block;margin:18px auto 0;background:none;border:1px solid rgba(216,207,188,.4);color:#d8cfbc;padding:7px 26px;letter-spacing:.3em;text-indent:.3em;font-family:serif;cursor:pointer}
+
+/* ============================================================
+   合言葉のゲート（2026-09-21 KEI・初回だけ）
+   細い金の罫線1枚。#hint と同じ金（--gold2 / #d8c48a 系）・明朝体・控えめな動き。
+   ============================================================ */
+#gate{position:fixed;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;opacity:0;transition:opacity 1.1s ease}
+/* 2026-09-22【バグ修正】合言葉の間は画面全体で操作を受け止め、後ろの canvas へ通さない
+   （入力欄と「ひらく」だけが効く。連打で本が開く穴を物理的に塞ぐ） */
+#gate.show{opacity:1;pointer-events:auto}
+#gate.gone{display:none}
+#gate .gwrap{position:relative;transition:transform var(--grelease,500ms) cubic-bezier(.3,0,.2,1);width:min(74vw,320px);padding:30px 22px 26px;box-sizing:border-box;text-align:center;pointer-events:auto}
+#gate .gwrap.shake{animation:gateShake .4s ease-in-out}
+@keyframes gateShake{
+  0%{transform:translateX(0)}   16.6%{transform:translateX(-6px)}  33.3%{transform:translateX(6px)}
+  50%{transform:translateX(-6px)}  66.6%{transform:translateX(6px)}  83.3%{transform:translateX(-4px)}
+  100%{transform:translateX(0)}}
+/* 枠は左右2枚の半身（2026-09-25 KEI: 割れは廃止。正解時は内側がふっと明るくなるだけ） */
+#gate .gpane{position:absolute;inset:0;border:1px solid rgba(216,196,138,.62);pointer-events:none;
+  background:rgba(5,3,1,.72);backdrop-filter:blur(2px);
+  box-shadow:inset 0 0 30px rgba(0,0,0,.6),0 10px 30px rgba(0,0,0,.6);
+  transition:box-shadow var(--grelease,500ms) ease-out,background-color var(--grelease,500ms) ease-out}
+#gate .gpane.l{clip-path:inset(0 50% 0 0)}
+#gate .gpane.r{clip-path:inset(0 0 0 50%)}
+/* 2026-09-25 KEI: 正解 → 「解けた」一拍（.ok・--grelease）→ ゲート全体がフェード（.release・--gsplit）→ 奥から本。
+   光は枠の内側だけ（縁の外へは出さない）。枠はほんの少し緩む（scale .985） */
+#gate.ok .gwrap{transform:scale(.985)}
+#gate.ok .gpane{background-color:rgba(20,14,6,.72);
+  box-shadow:inset 0 0 30px rgba(0,0,0,.6),inset 0 0 26px rgba(255,226,186,.16),0 10px 30px rgba(0,0,0,.6)}
+#gate.release{opacity:0;pointer-events:none;transition:opacity var(--gsplit,1200ms) ease}
+/* 縁を一周する光（0.9秒・金から白へ） */
+#gate .gsweep{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;overflow:visible}
+#gate .gsweep rect{fill:none;stroke:#ffe2ba;stroke-width:1.6;stroke-dasharray:170 226;stroke-dashoffset:396;
+  filter:drop-shadow(0 0 7px rgba(255,226,186,.95)) drop-shadow(0 0 18px rgba(216,196,138,.5))}
+#gate.ok .gsweep{opacity:0}                 /* 縁を走る光は出さない（2026-09-22 / 09-25 KEI） */
+#gate.ok .gsweep rect{animation:none}
+@keyframes gateSweep{from{stroke-dashoffset:396}to{stroke-dashoffset:0}}
+/* 中身 */
+#gate .gin{position:relative;z-index:1;transition:opacity .7s ease}
+#gate .gq{font-family:var(--serif);font-size:clamp(14px,4vmin,18px);letter-spacing:.26em;text-indent:.26em;color:var(--gold2);
+  text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8);margin:0 0 20px}
+/* 入力欄は contenteditable の div（iOS の連絡先・住所の自動入力を避ける・2026-09-30）。見た目は旧 input と同じ */
+#gate .gfield{display:block;width:100%;box-sizing:border-box;margin:0 auto;padding:6px 2px 8px;text-align:center;
+  font-family:var(--serif);font-size:clamp(17px,5vmin,22px);letter-spacing:.2em;text-indent:.2em;color:#ffe2ba;caret-color:#ffe2ba;
+  line-height:1.25;min-height:calc(1.25em + 14px);white-space:nowrap;overflow:hidden;cursor:text;
+  -webkit-user-select:text;user-select:text;-webkit-tap-highlight-color:transparent;
+  background:none;border:none;border-bottom:1px solid rgba(216,196,138,.5);border-radius:0;outline:none;-webkit-appearance:none}
+#gate .gfield:focus{border-bottom-color:rgba(255,226,186,.9)}
+#gate .gfield br{display:none}
+#gate .gbtn{display:block;margin:18px auto 0;background:none;border:none;cursor:pointer;
+  font-family:var(--serif);font-size:clamp(13px,3.8vmin,16px);letter-spacing:.34em;text-indent:.34em;color:var(--gold2);
+  padding:6px 10px;transition:color .18s ease}
+#gate .gbtn:active{color:#fff2c4}
+#gate .gerr{display:block;height:1.6em;margin:10px 0 -6px;pointer-events:none;
+  font-family:var(--ui);font-size:clamp(11px,3.1vmin,13px);letter-spacing:.14em;color:var(--paper2);
+  text-shadow:0 1px 3px #000;opacity:0;transition:opacity .35s ease}
+#gate .gerr.show{opacity:.9}
+
+/* 2026-09-22 KEI「入口の『名言の書』の文字は邪魔」: 入口（本の画面・合言葉の画面）では出さない。
+   本を開く時のタイトルカード（stage-opening）は 2026-09-13 KEI の指示どおり残す。
+   <title>・OGP・manifest の名前は変えていない。 */
+body.stage-book #readTitle{display:none}

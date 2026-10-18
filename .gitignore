@@ -1,0 +1,8 @@
+node_modules/
+assets/src/
+_check.cjs
+_shot-*.png
+_trash/
+_wip/
+_work/
+_backup_*/

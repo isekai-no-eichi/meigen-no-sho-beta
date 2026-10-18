@@ -10,6 +10,7 @@
 // ============================================================
 import { K, asset, MOBILE, QP, PERF, S, loadFavs, saveFavs, loadBookmark, saveBookmark, clearBookmark, bookmarkPages, removeBookmarkPage, type Bookmark } from '../state';
 import { pageSound, sealSound, ribbonSound, haptic, ensureAudio } from '../audio';
+import { showRetry, hideRetry } from '../ui/Retry';
 
 const N = 790;
 // 名言のページは AVIF（900x1200 q52・1枚 297KB → 約150KB）。
@@ -294,6 +295,7 @@ export class Reader {
   hide(): void {
     this.opened = false;
     this.pendingFlip = 0; this.el.load.classList.remove('show');
+    hideRetry();
     this.root.classList.remove('show', 'matchcut', 'dawning');
     if (this.dawnTimer) { clearTimeout(this.dawnTimer); this.dawnTimer = null; }
     if (this.ribbonTimer) { clearTimeout(this.ribbonTimer); this.ribbonTimer = null; }
@@ -365,6 +367,7 @@ export class Reader {
       this.imgs[i] = im; this.loading.delete(i);
       if (im) { this.loadedSet.add(i); this.failN.delete(i); }
       else this.failN.set(i, (this.failN.get(i) || 0) + 1);
+      this.retryCheck(i, !!im);
       const k = this.deck.indexOf(i);
       if (k >= this.index - 1 && k <= this.index + 1) this.draw();
       if (i === this.deck[0] || i === this.deck[this.index]) this.firstReady();
@@ -372,6 +375,15 @@ export class Reader {
       this.syncLoading();
       this.pump();
     });
+  }
+  /** 2026-10-19 beta: 開いているページ（前後1枚）が RETRY_MAX 回とも取れなかったら「読み込めなかった　もう一度」。
+   *  押すと失敗回数を消して先読みをやり直す。めくりの処理には触らない（ui/Retry.ts・?fx=0 では出ない） */
+  private retryCheck(i: number, ok: boolean): void {
+    const k = this.deck.indexOf(i);
+    const near = this.opened && k >= this.index - 1 && k <= this.index + 1;
+    if (ok) { if (k === this.index) hideRetry(); return; }
+    if (!near || (this.failN.get(i) || 0) < Reader.RETRY_MAX) return;   // 回数が残っている間は従来どおり pump() が取り直す
+    showRetry(() => { this.failN.clear(); this.pump(); this.syncLoading(); });
   }
   /** 未着のままスワイプされていたページが届いたら、そのままめくる（2026-09-26 QA D14） */
   private firePending(): void {

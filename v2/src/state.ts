@@ -150,3 +150,23 @@ export const PERF = QP.get('perf') !== '0';
 try {
   if (localStorage.getItem('bookexp-beta-build') !== BUILD) localStorage.setItem('bookexp-beta-build', BUILD);
 } catch { /* noop */ }
+
+// ---- 試作スイッチ（2026-10-19 beta・入口の3D演出と音）----
+//   優先順: ?fx=0 → 全部 false ／ ?<k>=0|1 → 個別 ／ localStorage 'bookexp-beta-fx'（JSON）／ FX_DEFAULT
+//   音係（audio/index.ts）も同じキー 'bookexp-beta-fx' を自前で読む。キー名と形（{env:true,...}）は変えない。
+export type FxKey = 'env' | 'pbr' | 'smoke' | 'etch' | 'reverb';
+export const FX_DEFAULT: Record<FxKey, boolean> = { env: true, pbr: true, smoke: false, etch: false, reverb: true };
+export const FX_KEY = 'bookexp-beta-fx';
+export function fxOn(k: FxKey): boolean {
+  if (QP.get('fx') === '0') return false;
+  const q = QP.get(k);
+  if (q === '0') return false;
+  if (q === '1') return true;
+  const saved = readJSON<Partial<Record<FxKey, boolean>>>(FX_KEY, {});
+  if (saved && typeof saved[k] === 'boolean') return saved[k] as boolean;
+  return FX_DEFAULT[k];
+}
+export function fxSet(k: FxKey, v: boolean): void {
+  const saved = readJSON<Partial<Record<FxKey, boolean>>>(FX_KEY, {});
+  writeJSON(FX_KEY, { ...(saved && typeof saved === 'object' ? saved : {}), [k]: v });
+}

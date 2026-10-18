@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2026-09-21">
 <link rel="icon" href="icon-192.png?v=2026-09-21" type="image/png">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 <title>名言の書（試作版） — 異世界の叡智</title>
 <meta name="description" content="開くたびにページの順番が入れ替わる不思議な本">
 <meta property="og:type" content="website">
@@ -29,9 +29,9 @@
 <meta name="twitter:description" content="開くたびにページの順番が入れ替わる不思議な本">
 <meta name="twitter:image" content="https://isekai-no-eichi.github.io/meigen-no-sho-beta/app2/og.jpg?v=6">
 <style>
-  /* 試作版の目印（2026-10-19・CSS のみ・押せない・控えめ） */
+  /* 試作版の目印（2026-10-19・控えめ）。押すと試作の切替パネル（ui/BetaPanel.ts） */
   #betaTag{position:fixed;top:calc(env(safe-area-inset-top,0px) + 6px);right:calc(env(safe-area-inset-right,0px) + 8px);
-    z-index:2147483647;pointer-events:none;user-select:none;-webkit-user-select:none;
+    z-index:2147483647;pointer-events:auto;cursor:pointer;padding:6px 4px 10px 12px;margin:-6px -4px 0 0;user-select:none;-webkit-user-select:none;
     font-family:var(--serif);font-size:11px;letter-spacing:.12em;color:rgba(230,217,189,.55);opacity:.8}
 </style>
 </head>

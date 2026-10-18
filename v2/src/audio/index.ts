@@ -70,6 +70,7 @@ function sxInit(): void {
     sx = new Ctor();
   } catch { sx = null; return; }
   sxMaster = sx.createGain(); sxMaster.gain.value = 1; sxMaster.connect(sx.destination);
+  if (FX_REVERB) initReverb();
   if (sx.state === 'suspended') sx.resume().then(tryRoute).catch(() => {}); else tryRoute();
 }
 // iPhone は <audio>.volume が効かない。AudioContext が「動いている」ことを確認してから GainNode 経由に切り替える
@@ -77,12 +78,100 @@ function tryRoute(): void {
   if (routed || !sx || sx.state !== 'running' || !sxMaster) return;
   try {
     const rs = sx.createMediaElementSource(rain); rainG = sx.createGain(); rs.connect(rainG); rainG.connect(sxMaster);
+    toReverb(rainG);
     decks.forEach((d, i) => { const src = sx!.createMediaElementSource(d); deckG[i] = sx!.createGain(); src.connect(deckG[i]!); deckG[i]!.connect(sxMaster!); });
     routed = true;
     rainG.gain.value = _rainV; rain.volume = 1;
     decks.forEach((d, i) => { deckG[i]!.gain.value = deckV[i]; d.volume = 1; });
   } catch { routed = false; }
 }
+// ---- 書斎の残響と遠くの柱時計（beta 2026-10-19）----
+//  スイッチ：localStorage 'bookexp-beta-fx' {reverb:boolean}（既定 true）／ ?fx=0 で全部 OFF ／ ?reverb=0|1 で個別。
+//  OFF の時は残響も柱時計も作らない＝従来と完全に同じ経路・同じ音量。
+//  残響を通すのは 雨・押下音・柱時計 だけ。めくり音・印・栞は KEI 確認待ちなので通さない。
+function fxReverb(): boolean {
+  try {
+    const q = new URLSearchParams(location.search);
+    const r = q.get('reverb'); if (r === '0') return false; if (r === '1') return true;
+    if (q.get('fx') === '0') return false;
+  } catch { /* noop */ }
+  try {
+    const o = JSON.parse(localStorage.getItem('bookexp-beta-fx') || 'null');
+    if (o && typeof o.reverb === 'boolean') return o.reverb;
+  } catch { /* noop */ }
+  return true;
+}
+const FX_REVERB = fxReverb();
+const REV_WET = 0.11, REV_DUR = 1.05;
+const CLOCK_VOL = 0.035, CLOCK_PERIOD = 1.0, CLOCK_JIT = 0.03, CLOCK_LP = 1200;
+let revIn: GainNode | null = null;
+/** 木の小部屋の IR を合成（ステレオ白色ノイズ × 指数減衰・後ろほど暗く）。出典問題も課金も無い */
+function makeRoomIR(ctx: AudioContext, dur: number): AudioBuffer {
+  const sr = ctx.sampleRate, len = Math.floor(sr * dur), pre = Math.floor(sr * 0.007);
+  const ir = ctx.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c); let lp = 0;
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / sr, k = i / len;
+      const a = 0.55 - 0.4 * k;                                  // 一極 LPF：時間とともに高域を吸う（木の壁・本棚）
+      lp = lp + a * ((Math.random() * 2 - 1) - lp);
+      d[i] = lp * Math.exp(-6.9 * t / (dur - pre / sr));        // dur で約 -60dB
+    }
+  }
+  return ir;
+}
+function initReverb(): void {
+  if (!sx || !sxMaster || revIn) return;
+  try {
+    const conv = sx.createConvolver(); conv.buffer = makeRoomIR(sx, REV_DUR);
+    const hs = sx.createBiquadFilter(); hs.type = 'highshelf'; hs.frequency.value = 3000; hs.gain.value = -9;
+    const lo = sx.createBiquadFilter(); lo.type = 'highpass'; lo.frequency.value = 120;   // 低域のこもりを残響に乗せない
+    const wet = sx.createGain(); wet.gain.value = REV_WET;
+    revIn = sx.createGain(); revIn.gain.value = 1;
+    revIn.connect(conv); conv.connect(hs); hs.connect(lo); lo.connect(wet); wet.connect(sxMaster);
+  } catch { revIn = null; }
+}
+function toReverb(n: AudioNode): void { if (revIn) { try { n.connect(revIn); } catch { /* noop */ } } }
+
+/** 遠くの柱時計「コッ…コッ」。約1秒周期・毎打 ±3%・チク/タクで少し音程を変える。雨が鳴っている間だけ */
+let clockStarted = false, clockNext = 0, clockN = 0;
+function clockWanted(): boolean { return FX_REVERB && audioOn && !!S.sound && !!S.rain && !rain.paused && curve(S.amb) > 0; }
+function clockTick(t: number, tock: boolean): void {
+  if (!sx || !sxMaster) return;
+  const peak = CLOCK_VOL * curve(S.amb) * ambBoostCur; if (peak < 1e-4) return;
+  const lp = sx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = CLOCK_LP; lp.Q.value = 0.6;
+  const out = sx.createGain(); out.gain.value = 1; lp.connect(out); out.connect(sxMaster); toReverb(out);
+  const f = (tock ? 184 : 204) * (1 + (Math.random() - 0.5) * 2 * CLOCK_JIT);
+  const o = sx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f * 1.15, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.012);
+  const g = sx.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+  o.connect(g); g.connect(lp); o.start(t); o.stop(t + 0.13);
+  const o2 = sx.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 2.76;   // 木の倍音（非整数）
+  const g2 = sx.createGain();
+  g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime(peak * 0.35, t + 0.0015); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  o2.connect(g2); g2.connect(lp); o2.start(t); o2.stop(t + 0.06);
+  const nb = noiseBuffer(0.008, k => Math.pow(1 - k, 3)); if (!nb) return;
+  const n = sx.createBufferSource(); n.buffer = nb;
+  const bp = sx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.2;
+  const g3 = sx.createGain(); g3.gain.value = peak * 0.5;
+  n.connect(bp); bp.connect(g3); g3.connect(lp); n.start(t);
+}
+function startClock(): void {
+  if (!FX_REVERB || clockStarted || !sx) return; clockStarted = true;
+  (function loop() {
+    if (sx && sx.state === 'running' && clockWanted()) {
+      const now = sx.currentTime;
+      if (clockNext < now) clockNext = now + 0.3;
+      while (clockNext < now + 1.2) {                          // 1.2 秒先まで予約（裏タブの setTimeout 間引き対策）
+        clockTick(clockNext, (clockN++ & 1) === 1);
+        clockNext += CLOCK_PERIOD * (1 + (Math.random() - 0.5) * 2 * CLOCK_JIT);
+      }
+    } else clockNext = 0;
+    setTimeout(loop, 300);
+  })();
+}
+
 function setRainVol(v: number): void { _rainV = v; if (routed && rainG && sx) rainG.gain.setTargetAtTime(v, sx.currentTime, 0.05); else rain.volume = v; }
 function setDeckVol(i: number, v: number): void {
   v = Math.max(0, Math.min(1, v)); deckV[i] = v;
@@ -210,12 +299,12 @@ export function tapSound(): void {
     o.frequency.setValueAtTime(980, t0); o.frequency.exponentialRampToValueAtTime(520, t0 + 0.045);
     const g = sx.createGain();
     g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
-    o.connect(g); g.connect(sxMaster); o.start(t0); o.stop(t0 + 0.07);
+    o.connect(g); g.connect(sxMaster); toReverb(g); o.start(t0); o.stop(t0 + 0.07);
     const nb = noiseBuffer(0.02, x => Math.pow(1 - x, 4)); if (!nb) return;
     const n = sx.createBufferSource(); n.buffer = nb;
     const bp = sx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 1.1;
     const g2 = sx.createGain(); g2.gain.value = 0.05;
-    n.connect(bp); bp.connect(g2); g2.connect(sxMaster); n.start(t0);
+    n.connect(bp); bp.connect(g2); g2.connect(sxMaster); toReverb(g2); n.start(t0);
   } catch { /* noop */ }
 }
 /** 低いノイズのうねり（共通部品） */
@@ -438,7 +527,7 @@ export function ensureAudio(): void {
   if (!S.sound) return;                                     // 音OFFの間は音に一切触らない
   applyRainSrc();
   unlockAudio(); sxInit(); loadPageBuf(); loadFlipBufs();
-  startCrickets(); startCrackle();
+  startCrickets(); startCrackle(); startClock();
   if (audioOn) return;
   audioOn = true; applyAudio();
 }
@@ -487,4 +576,5 @@ export function initAudioGlobalHooks(): void {
 export const audioDebug = () => ({
   audioOn, routed, sxState: sx && sx.state, rainV: _rainV, deckV,
   flipBufs: flipBufs.filter(Boolean).length, pageBuf: !!pageBuf, taps: tapCount,
+  fxReverb: FX_REVERB, reverb: !!revIn, clock: clockWanted(), clockTicks: clockN,
 });

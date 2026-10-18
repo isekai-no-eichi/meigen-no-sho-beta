@@ -365,3 +365,31 @@ body:not(.uiimg) #ui,body:not(.uiimg) #menu .frame,body:not(.uiimg) #favBtn,body
    本を開く時のタイトルカード（stage-opening）は 2026-09-13 KEI の指示どおり残す。
    <title>・OGP・manifest の名前は変えていない。 */
 body.stage-book #readTitle{display:none}
+
+/* ============================================================
+   試作版（beta 2026-10-19）: 切替パネル（ui/BetaPanel.ts）と読み込み失敗の「もう一度」（ui/Retry.ts）
+   配色と書体は説明パネル（黒革 .frame・明朝・金）に揃える。アイコンは使わない。
+   ============================================================ */
+#betaPanel{position:fixed;inset:0;z-index:2147483646;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55)}
+#betaPanel.show{display:flex}
+#betaPanel .bbox{width:min(calc(100vw - 32px),380px);box-sizing:border-box;border-width:22px;border-image-width:22px;padding:4px 8px 2px;color:var(--paper)}
+#betaPanel .bh{margin:2px 0 1em;padding-bottom:10px;border-bottom:1px solid rgba(201,162,74,.28);text-align:center;
+  font-family:var(--serif);font-size:clamp(14px,4vmin,16px);letter-spacing:.34em;text-indent:.34em;color:var(--gold2)}
+#betaPanel .brow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid rgba(201,162,74,.12)}
+#betaPanel .bl{font-family:var(--serif);font-size:clamp(14px,4vmin,16px);letter-spacing:.06em;color:var(--paper)}
+#betaPanel .bsw{flex:none;display:flex;gap:6px}
+#betaPanel .bsw button{font-family:var(--serif);font-size:clamp(13px,3.7vmin,15px);letter-spacing:.1em;padding:6px 12px;cursor:pointer;border-radius:1px;
+  background:rgba(0,0,0,.28);border:1px solid rgba(201,162,74,.25);color:rgba(216,196,138,.38);transition:color .2s,border-color .2s,background .2s}
+#betaPanel .bsw button.sel{color:var(--gold2);border-color:rgba(201,162,74,.85);background:rgba(201,162,74,.14)}
+#betaPanel .bnote{margin:1em 0 .2em;text-align:center;font-family:var(--serif);font-size:clamp(12px,3.4vmin,13.5px);letter-spacing:.08em;color:var(--paper2)}
+#betaPanel .bclose{display:block;margin:10px auto 4px;background:rgba(0,0,0,.28);border:1px solid rgba(201,162,74,.45);color:var(--gold2);
+  padding:10px 32px;letter-spacing:.3em;text-indent:.3em;font-family:var(--serif);font-size:clamp(12.5px,3.6vmin,14.5px);cursor:pointer;border-radius:1px}
+#betaPanel .bclose:active,#betaPanel .bsw button:active{color:#fff2c4}
+/* 「読み込めなかった　もう一度」: #hint と同じ位置・書体。押せる文字 */
+#retry{position:fixed;left:50%;top:66%;top:66dvh;transform:translate(-50%,-50%);z-index:40;display:none;flex-direction:column;align-items:center;
+  background:none;border:0;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#retry.show{display:flex}
+#retry .txt{font-family:var(--serif);font-size:clamp(14px,4vmin,19px);letter-spacing:.26em;text-indent:.26em;font-weight:400;color:var(--gold2);
+  white-space:nowrap;text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8)}
+#retry .rule{display:block;width:min(46vw,260px);height:1px;margin:14px auto 0;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+#retry:active .txt{color:#fff2c4}

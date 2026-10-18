@@ -122,6 +122,68 @@ async function buildUi() {
   }
 }
 
+// ------------------------------------------------------------ pbr（2026-10-19 試作版 beta・fx 'pbr'）
+// ambientCG（CC0）の 1K JPG を展開したフォルダから、3Dの本の革と小口の地図を作る。
+//   node scripts/build-assets.mjs pbr <展開先フォルダ>（中に Leather037/ Paper005/ がある）
+//   出力 ../assets/pbr/:
+//     cover-normal-pbr.webp : 既存 cover-normal（目の型押し）に Leather037 の革目を 3 回繰り返して重ねる（whiteout 合成）
+//     cover-rough-pbr.webp  : 既存 cover-rough × (0.80 + 0.20 × 革の roughness)＝擦れた所だけわずかに艶
+//     edge-normal.webp      : 小口。V 方向に 1 枚ずつ紙の重なり（行ごとの高さの揺らぎ）＋ Paper005 の凹凸を薄く
+//     paper-normal.webp     : Paper005 の NormalGL を 1024 webp に（紙束の上面）
+async function buildPbr() {
+  const sharp = (await import('sharp')).default;
+  const src = process.argv[3];
+  if (!src || !fs.existsSync(src)) { log('pbr: 展開先フォルダを指定する', src); return; }
+  const out = path.join(ASSETS, 'pbr'); fs.mkdirSync(out, { recursive: true });
+  const raw = async (file, w, h) => (await sharp(file).resize(w, h, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true })).data;
+  const tile = async (file, w, h, rep) => {          // rep 回繰り返した w×h
+    const tw = Math.round(w / rep), th = Math.round(h / rep);
+    const one = await sharp(file).resize(tw, th, { fit: 'fill' }).removeAlpha().toBuffer();
+    const comp = [];
+    for (let y = 0; y < h; y += th) for (let x = 0; x < w; x += tw) comp.push({ input: one, left: x, top: y });
+    return (await sharp({ create: { width: w, height: h, channels: 3, background: '#000' } }).composite(comp).raw().toBuffer({ resolveWithObject: true })).data;
+  };
+  const W = 768, H = 1024;                          // 既存の表紙地図と同じ縦横比
+  const L = path.join(src, 'Leather037', 'Leather037_1K-JPG_');
+  const P = path.join(src, 'Paper005', 'Paper005_1K-JPG_');
+  // 表紙の法線：whiteout 合成 n = normalize(a.xy + b.xy, a.z * b.z)
+  const cn = await raw(path.join(ASSETS, 'cover-normal.webp'), W, H);
+  const ln = await tile(L + 'NormalGL.jpg', W, H, 3);
+  const nOut = Buffer.alloc(W * H * 3);
+  for (let i = 0; i < W * H; i++) {
+    const ax = cn[i*3]/127.5-1, ay = cn[i*3+1]/127.5-1, az = cn[i*3+2]/127.5-1;
+    const bx = (ln[i*3]/127.5-1)*0.9, by = (ln[i*3+1]/127.5-1)*0.9, bz = ln[i*3+2]/127.5-1;
+    let x = ax + bx, y = ay + by, z = az * bz; const d = Math.hypot(x, y, z) || 1; x /= d; y /= d; z /= d;
+    nOut[i*3] = Math.round((x+1)*127.5); nOut[i*3+1] = Math.round((y+1)*127.5); nOut[i*3+2] = Math.round((z+1)*127.5);
+  }
+  await sharp(nOut, { raw: { width: W, height: H, channels: 3 } }).webp({ quality: 90 }).toFile(path.join(out, 'cover-normal-pbr.webp'));
+  // 表紙の roughness
+  const cr = await raw(path.join(ASSETS, 'cover-rough.jpg'), W, H);
+  const lr = await tile(L + 'Roughness.jpg', W, H, 3);
+  const rOut = Buffer.alloc(W * H * 3);
+  for (let i = 0; i < W * H * 3; i++) rOut[i] = Math.round(cr[i] * (0.80 + 0.20 * lr[i] / 255));
+  await sharp(rOut, { raw: { width: W, height: H, channels: 3 } }).webp({ quality: 88 }).toFile(path.join(out, 'cover-rough-pbr.webp'));
+  // 小口：行ごとの高さ（紙1枚ずつの重なり）→ 法線。U に沿って筋、V 方向に細かく
+  const EW = 1024, EH = 1024;
+  const pd = await raw(P + 'Displacement.jpg', EW, EH);
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  // 1枚＝2px（紙と隙間）＋ 折丁（約24枚の束）ごとの段差。遠目でミップが筋を均しても束の段差は残る
+  const rowH = new Float32Array(EH); { let v = 0.5, b = 0, nb = 0; for (let y = 0; y < EH; y++) { if (y % 2 === 0) v = 0.25 + rnd() * 0.75; if (y >= nb) { b = rnd(); nb = y + 36 + Math.floor(rnd() * 28); } rowH[y] = ((y % 2 === 1) ? v * 0.35 : v) * 0.6 + b * 0.9 + (y < nb - 2 ? 0 : -0.6); } }
+  const hgt = new Float32Array(EW * EH);
+  for (let y = 0; y < EH; y++) for (let x = 0; x < EW; x++) hgt[y*EW+x] = rowH[y] + (pd[(y*EW+x)*3] / 255 - 0.5) * 0.35;
+  const eOut = Buffer.alloc(EW * EH * 3), S = 2.2;
+  for (let y = 0; y < EH; y++) for (let x = 0; x < EW; x++) {
+    const hx = hgt[y*EW+((x+1)%EW)] - hgt[y*EW+((x-1+EW)%EW)];
+    const hy = hgt[((y+1)%EH)*EW+x] - hgt[((y-1+EH)%EH)*EW+x];
+    let nx = -hx * S, ny = hy * S, nz = 1; const d = Math.hypot(nx, ny, nz); nx /= d; ny /= d; nz /= d;
+    const i = (y*EW+x)*3; eOut[i] = Math.round((nx+1)*127.5); eOut[i+1] = Math.round((ny+1)*127.5); eOut[i+2] = Math.round((nz+1)*127.5);
+  }
+  await sharp(eOut, { raw: { width: EW, height: EH, channels: 3 } }).webp({ quality: 90 }).toFile(path.join(out, 'edge-normal.webp'));
+  await sharp(P + 'NormalGL.jpg').resize(1024, 1024, { fit: 'inside' }).webp({ quality: 88 }).toFile(path.join(out, 'paper-normal.webp'));
+  for (const f of fs.readdirSync(out)) log('pbr', f, (fs.statSync(path.join(out, f)).size / 1e3).toFixed(0) + 'KB');
+}
+
+if (task === 'pbr') await buildPbr();
 if (task === 'ui' || task === 'all') await buildUi();
 if (task === 'glb' || task === 'all') await buildGlb();
 if (task === 'rain' || task === 'all') buildRain();

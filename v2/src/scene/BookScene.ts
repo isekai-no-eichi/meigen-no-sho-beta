@@ -17,7 +17,9 @@ import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { asset, MOBILE, QP, BUILD, PERF, loadFavs, hasBookmark, isUnlocked } from '../state';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
+import { asset, MOBILE, QP, BUILD, PERF, loadFavs, hasBookmark, isUnlocked, fxOn } from '../state';
+import { SmokeShader, EtchShader } from './BetaFx';
 import { RoomBackground } from './RoomBackground';
 
 /** 表紙の箔押しタイトル「名言の書」。2026-09-08 KEI「チャチい」→ 無し。戻す時は true */
@@ -48,6 +50,19 @@ const DIVE_DUR = 1.6;                     // ページの間へ潜る時間（�
 export const FLARE_GAIN = 0.5;
 /** ブルームの基準強度。2026-09-09 KEI: 開く時の右下のキラキラを半減 */
 const BLOOM_BASE = MOBILE ? 0.24 : 0.30;
+
+// ---- 試作スイッチ（2026-10-19 beta・state.ts fxOn）。OFF の時は従来と同じ値・同じ処理 ----
+/** env: 環境マップを Poly Haven fireplace_1k.hdr に。映り込みが暖炉の色になる分、強さは ×0.6 */
+const FX_ENV = fxOn('env');
+const ENV_K = FX_ENV ? qn('envk', 0.6) : 1;   // 0.8 では表紙と小口が橙に光りすぎた（2026-10-19 撮影で比較）→ 0.6。?envk= で試せる
+/** pbr: 表紙に革目（ambientCG Leather037）を重ねた法線・roughness、小口に紙の重なりの法線 */
+const FX_PBR = fxOn('pbr');
+/** smoke: 背景の机のろうそくから細い煙（既定 OFF） */
+const FX_SMOKE = fxOn('smoke');
+/** etch: 3Dの画面を銅版画風に（ハッチング＋輪郭・既定 OFF） */
+const FX_ETCH = fxOn('etch');
+/** 煙の立つ位置＝背景の絵（app-bg.jpg 941x1672）の机のろうそくの炎。絵の中心を 0 とした比率 */
+const SMOKE_AT = { x: 268 / 470 - 0.5, y: 0.5 - 308 / 835 };
 
 const GradeShader = {
   uniforms: {
@@ -170,6 +185,8 @@ export class BookScene {
   private bloomPass: UnrealBloomPass | null = null;
   private bokehPass: BokehPass | null = null;
   private gradePass: ShaderPass | null = null;
+  private etchPass: ShaderPass | null = null;
+  private smoke: THREE.Mesh | null = null;
   private perfN = 0; private perfT = 0; private perfDone = false;
 
   camTheta = 0.35; camPhi = 1.02;
@@ -217,6 +234,7 @@ export class BookScene {
       this.candleB.shadow.radius = 4;
     }
     if (QUALITY) { this.camera.add(this.room.object); this.room.load(() => this.room.layout(this.camera)); }
+    if (QUALITY && FX_SMOKE) this.buildSmoke();
     this.scene.add(this.pivot);
 
     // 塵
@@ -258,7 +276,7 @@ export class BookScene {
     this.buildComposer();
   }
 
-  load(onReady: () => void): void {
+  load(onReady: () => void, onFail?: () => void): void {
     const glbOverride = QP.get('glb');
     // v2: 本体は Draco + WebP(1024) に落とした自ホスト版（4.18MB → 0.86MB）。
     //     デコーダも public/draco/ に同梱して自ホスト（CDN依存ゼロ）。
@@ -281,7 +299,7 @@ export class BookScene {
           if (mat.color) mat.color.multiplyScalar(0.86);
           // 2026-09-22 KEI「回している時、本に変な影が付く」→ 本は影を「落とす」だけにし、
           // 自分の影を「受けない」。机への柔らかい接地影はそのまま残る。
-          if (QUALITY) { m.castShadow = true; m.receiveShadow = BOOK_SELF_SHADOW; mat.envMapIntensity = 0.22; }
+          if (QUALITY) { m.castShadow = true; m.receiveShadow = BOOK_SELF_SHADOW; mat.envMapIntensity = 0.22 * ENV_K; }
         }
       });
       if (QUALITY) this.applyLeather(book);
@@ -310,23 +328,49 @@ export class BookScene {
         if (this.gradePass) this.gradePass.uniforms.uVig.value = qn('ivig', 0.08);
       }
       onReady();
+    }, undefined, err => {
+      // 2026-10-19 beta: 取れなかった時は main.ts が「読み込めなかった　もう一度」を出す（?fx=0 では従来どおり何もしない）
+      console.warn('book.glb load failed', err);
+      if (onFail) onFail();
     });
   }
 
   private applyLeather(root: THREE.Object3D): void {
     const tl = new THREE.TextureLoader();
-    const nrm = tl.load(asset('cover-normal.webp')); nrm.flipY = false; nrm.colorSpace = THREE.NoColorSpace;
-    const rgh = tl.load(asset('cover-rough.jpg')); rgh.flipY = false; rgh.colorSpace = THREE.NoColorSpace;
+    // pbr: 既存の型押し（目の紋章）に革目を重ねて焼いた地図（scripts/build-assets.mjs pbr）。UV は既存と同じ
+    const nrm = tl.load(asset(FX_PBR ? 'pbr/cover-normal-pbr.webp' : 'cover-normal.webp')); nrm.flipY = false; nrm.colorSpace = THREE.NoColorSpace;
+    const rgh = tl.load(asset(FX_PBR ? 'pbr/cover-rough-pbr.webp' : 'cover-rough.jpg')); rgh.flipY = false; rgh.colorSpace = THREE.NoColorSpace;
+    if (FX_PBR) this.applyPagesPbr(root, tl);
     root.traverse(o => {
       const m = o as THREE.Mesh;
       if (!m.isMesh || !m.material) return;
       if (/Cover_Front|Cover_Back/.test(m.name)) {
         const mat = m.material as THREE.MeshStandardMaterial;
-        mat.normalMap = nrm; mat.normalScale = new THREE.Vector2(0.55, 0.55);
-        mat.roughnessMap = rgh; mat.roughness = 1.0; mat.envMapIntensity = 0.35; mat.needsUpdate = true;
+        mat.normalMap = nrm; mat.normalScale = FX_PBR ? new THREE.Vector2(0.8, 0.8) : new THREE.Vector2(0.55, 0.55);
+        mat.roughnessMap = rgh; mat.roughness = 1.0; mat.envMapIntensity = 0.35 * ENV_K; mat.needsUpdate = true;
       }
     });
   }
+  /** pbr: 紙の束。小口（M_Pages）は1枚ずつの重なりの法線、上面（M_PageTop）は紙の凹凸を薄く（2026-10-19 beta） */
+  private applyPagesPbr(root: THREE.Object3D, tl: THREE.TextureLoader): void {
+    const edge = tl.load(asset('pbr/edge-normal.webp')); edge.flipY = false; edge.colorSpace = THREE.NoColorSpace;
+    edge.wrapS = edge.wrapT = THREE.RepeatWrapping;
+    const paper = tl.load(asset('pbr/paper-normal.webp')); paper.flipY = false; paper.colorSpace = THREE.NoColorSpace;
+    paper.wrapS = paper.wrapT = THREE.RepeatWrapping; paper.repeat.set(2, 2);
+    root.traverse(o => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.material) return;
+      const mat = m.material as THREE.MeshStandardMaterial;
+      if (mat.name === 'M_Pages') {
+        mat.normalMap = edge; mat.normalScale = new THREE.Vector2(0.9, 0.9);
+        mat.roughness = 1.0; mat.needsUpdate = true;
+      } else if (mat.name === 'M_PageTop') {
+        mat.normalMap = paper; mat.normalScale = new THREE.Vector2(0.35, 0.35);
+        mat.roughness = 1.0; mat.needsUpdate = true;
+      }
+    });
+  }
+
 
 
   // ------------------------------------------------------------------
@@ -503,7 +547,7 @@ export class BookScene {
     this.favMarks = new THREE.Group();
     const bw = bb.max.x - bb.min.x, by = bb.max.y - bb.min.y, bz = bb.max.z - bb.min.z;
     const py = pb.max.y - pb.min.y, pz = pb.max.z - pb.min.z;
-    const mat = new THREE.MeshStandardMaterial({ color: 0xd9b25a, roughness: 0.35, metalness: 0.7, emissive: 0x3a2a08 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0xd9b25a, roughness: 0.35, metalness: 0.7, emissive: 0x3a2a08, envMapIntensity: ENV_K });
     const dx = bw * 0.012;
     const geo = new THREE.BoxGeometry(dx, Math.max(0.0006, by * 0.006), bz * 0.028);
     favs.slice(0, 80).forEach((p, i) => {
@@ -669,6 +713,24 @@ export class BookScene {
     setTimeout(() => { for (let i = 0; i < this.dspd.length; i++) this.dspd[i] = 0.008 + Math.random() * 0.02; }, 1800);
   }
 
+  /** smoke: 背景の絵の机のろうそくから立つ細い煙。部屋の板（カメラの子）の子にして、絵と一緒に動く。
+   *  半透明の通常合成・depthWrite なし。本より奥（板の 1mm 手前）なので本が前を通れば隠れる */
+  private buildSmoke(): void {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(SmokeShader.uniforms),
+      vertexShader: SmokeShader.vertexShader, fragmentShader: SmokeShader.fragmentShader,
+      transparent: true, depthWrite: false, toneMapped: true,
+    });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    // 板は 1×1 を (pw,ph) に伸ばしている＝子の座標は絵の比率。幅は炎の数倍・高さは絵の約36%（縦画面では根元が本の陰に隠れ、本の上へ細く抜ける）
+    const W = 0.16, H = 0.36;
+    m.scale.set(W, H, 1);
+    m.position.set(SMOKE_AT.x, SMOKE_AT.y + H / 2 - 0.002, 0.001);
+    m.renderOrder = -9;
+    this.room.object.add(m);
+    this.smoke = m;
+  }
+
   private buildComposer(): void {
     if (!QUALITY || QP.get('q_post') === '0') return;
     this.composer = new EffectComposer(this.renderer);
@@ -680,6 +742,11 @@ export class BookScene {
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), BLOOM_BASE, 0.45, 0.86);
     this.setBloomSize();
     this.composer.addPass(this.bloomPass);
+    if (FX_ETCH) {                                   // etch: ブルームの後・色の仕上げ（Grade）の前に1枚
+      this.etchPass = new ShaderPass(EtchShader);
+      this.etchPass.uniforms.uPx.value = this.renderer.getPixelRatio();
+      this.composer.addPass(this.etchPass);
+    }
     this.gradePass = new ShaderPass(GradeShader);
     if (QP.get('q_vig')) this.gradePass.uniforms.uVig.value = +QP.get('q_vig')!;
     if (MOBILE) { this.gradePass.uniforms.uGrain.value = 0.012; this.gradePass.uniforms.uCA.value = 0.0; }
@@ -688,6 +755,18 @@ export class BookScene {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
+    if (FX_ENV) this.loadFireplaceEnv();
+  }
+
+  /** env: 暖炉の夜の部屋（Poly Haven fireplace 1K・CC0）。読み終わるまでは RoomEnvironment のまま。失敗しても旧のまま */
+  private loadFireplaceEnv(): void {
+    new HDRLoader().load(asset('env/fireplace_1k.hdr'), t => {
+      const pm = new THREE.PMREMGenerator(this.renderer);
+      const old = this.scene.environment;
+      this.scene.environment = pm.fromEquirectangular(t).texture;
+      t.dispose(); pm.dispose();
+      if (old) old.dispose();
+    }, undefined, () => { /* 旧の環境のまま */ });
   }
 
   /** ブルームの描画先を実解像度の半分に落とす（2026-09-09 軽量化）。resolution だけでは実サイズが変わらない */
@@ -706,6 +785,7 @@ export class BookScene {
     if (this.composer) {
       this.composer.setSize(innerWidth, innerHeight);
       this.setBloomSize();
+      if (this.etchPass) this.etchPass.uniforms.uPx.value = this.renderer.getPixelRatio();
     }
   }
 
@@ -798,6 +878,7 @@ export class BookScene {
       this.fireB.intensity = 0.9 + fl * 0.22 + this.shake * 0.4;
       this.room.setBreath(0.97 + fl * 0.025 + (this.candleB.intensity - CANDLE_I) * 0.03);
       if (this.gradePass) this.gradePass.uniforms.uTime.value = t;
+      if (this.smoke) (this.smoke.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
       if (this.bokehPass) (this.bokehPass.uniforms as Record<string, { value: number }>)['focus'].value = this.camera.position.length();
     }
 

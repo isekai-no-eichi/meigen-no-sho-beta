@@ -1,0 +1,3 @@
+cover-normal-pbr.webp / cover-rough-pbr.webp — ambientCG Leather037 (1K-JPG) の NormalGL / Roughness を既存 cover-normal / cover-rough に重ねて焼いたもの — CC0 — https://ambientcg.com/view?id=Leather037 （ライセンス https://docs.ambientcg.com/license/ ）
+edge-normal.webp / paper-normal.webp — ambientCG Paper005 (1K-JPG) の Displacement / NormalGL から作成 — CC0 — https://ambientcg.com/view?id=Paper005
+作り直し: cd v2 && node scripts/build-assets.mjs pbr <ambientCG の zip を展開したフォルダ（Leather037/ Paper005/ を含む）>

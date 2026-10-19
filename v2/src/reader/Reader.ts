@@ -8,9 +8,11 @@
 //    - 紙は丸めすぎない（peel の P1/P2 係数）
 //    - finishFlip の dur / イージング / commitTo のしきい値
 // ============================================================
-import { K, asset, MOBILE, QP, PERF, S, loadFavs, saveFavs, loadBookmark, saveBookmark, clearBookmark, bookmarkPages, removeBookmarkPage, type Bookmark } from '../state';
+import { K, asset, MOBILE, QP, PERF, S, loadFavs, saveFavs, loadBookmark, saveBookmark, clearBookmark, bookmarkPages, removeBookmarkPage, fxOn, type Bookmark } from '../state';
 import { pageSound, sealSound, ribbonSound, haptic, ensureAudio } from '../audio';
 import { showRetry, hideRetry } from '../ui/Retry';
+/** beta 2026-10-19: 傾きで灯りの中心を少し大きく動かす（スイッチ tilt） */
+const TILT_FX = fxOn('tilt');
 
 const N = 790;
 // 名言のページは AVIF（900x1200 q52・1枚 297KB → 約150KB）。
@@ -591,7 +593,8 @@ export class Reader {
     //   焼き直しが走り、めくり中に一番重くなっていたため。毎フレームの勾配生成に戻す＝v3 以前と同じ見た目。
     this.tilt.sx += (this.tilt.x - this.tilt.sx) * 0.12;
     this.tilt.sy += (this.tilt.y - this.tilt.sy) * 0.12;
-    const tx = this.tilt.on ? this.tilt.sx * 0.10 : 0, ty = this.tilt.on ? this.tilt.sy * 0.08 : 0;
+    // beta 2026-10-19（tilt）: 灯りの中心の追従を少し広げる（横 ±10%→±14%・縦 ±8%→±11%）。切なら従来値
+    const tx = this.tilt.on ? this.tilt.sx * (TILT_FX ? 0.14 : 0.10) : 0, ty = this.tilt.on ? this.tilt.sy * (TILT_FX ? 0.11 : 0.08) : 0;
     const cx = pw * (1.06 + tx + n * 0.03 + n2 * 0.015 + gu * Math.sin(this._fl.t * 33) * 0.035);
     const cy = ph * (1.16 + ty + n * 0.02 - gu * 0.02);
     const r = Math.max(pw, ph) * (1.72 + n * 0.10 + cur * 0.16 + gj * 0.10);
@@ -1001,8 +1004,8 @@ export class Reader {
       const p = this.deck[this.index];
       this.favs = loadFavs();                    // 保存直前に読み直す（別タブの印を消さない・2026-09-26 QA D16）
       const i = this.favs.indexOf(p);
-      if (i >= 0) { this.favs.splice(i, 1); sealSound(false); haptic(6); this.toast('印を外しました'); }
-      else { this.favs.push(p); this.favStamp = { t0: performance.now() }; sealSound(true); haptic([10, 20, 15]); this.stampAnim(); this.toast('このページに印をつけました'); }
+      if (i >= 0) { this.favs.splice(i, 1); sealSound(false); haptic(6, true); this.toast('印を外しました'); }
+      else { this.favs.push(p); this.favStamp = { t0: performance.now() }; sealSound(true); haptic([10, 20, 15], true); this.stampAnim(); this.toast('このページに印をつけました'); }
       saveFavs(this.favs); this.updateFavUI();
       this.hooks.onFav({ count: this.favs.length, on: i < 0 });
     });
@@ -1015,7 +1018,7 @@ export class Reader {
       const page = this.deck[this.index];
       // 栞のあるページでもう一度押す＝そのページの栞だけを外す（他の栞は残る）
       if (bookmarkPages().includes(page)) {
-        removeBookmarkPage(page); this.hideRibbon(true); ribbonSound(); haptic(6);
+        removeBookmarkPage(page); this.hideRibbon(true); ribbonSound(); haptic(6, true);
         this.toast('栞を外しました'); this.el.favListBtn.classList.remove('on');
         this.hooks.onBookmark({ off: true });
         return;
@@ -1025,7 +1028,7 @@ export class Reader {
       const b: Bookmark = { deck: this.deck, index: Math.min(this.index, this.deck.length - 1), ts: Date.now(), fav: this.favMode, seen: [...this.seenSet] };
       saveBookmark(b);
       this.toast('栞を挟みました');
-      this.showRibbon(true); ribbonSound(); haptic([10, 20, 15]);
+      this.showRibbon(true); ribbonSound(); haptic([10, 20, 15], true);
       this.el.favListBtn.classList.add('on'); this.hooks.onBookmark({ off: false });
     });
     // 押下音は audio の共通フック（tapSound）が鳴らす（2026-09-30 KEI: 全ボタン同じ音に統一）

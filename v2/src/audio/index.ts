@@ -6,7 +6,8 @@
 //  - めくり音の中身（VAR 5声色・ピッチ揺らぎ・音量カーブ）は KEI 確定。変えない。
 //  - 擦れ音 rustle* は KEI 不採用のため、そもそも実装しない。
 // ============================================================
-import { S, saveSettings, applySoundFlags, curve, asset, BUILD } from '../state';
+import { S, saveSettings, applySoundFlags, curve, asset, BUILD, fxOn } from '../state';
+import { WebHaptics } from 'web-haptics';
 
 const RAIN_SRC: Record<string, string> = {
   std: asset('rain.mp3'),
@@ -46,6 +47,16 @@ const BGM_XF = 6.0;
 let audioOn = false, unlocked = false, bgmWanted = false;
 let sx: AudioContext | null = null, sxMaster: GainNode | null = null;
 let routed = false, rainG: GainNode | null = null, _rainV = 1;
+const TILT_FX = fxOn('tilt');
+let rainPan: StereoPannerNode | null = null, _rainPanV = 0;
+/** beta（tilt）: 端末の左右の傾き -1..1 → 雨の定位 ±0.3。0.4秒でなます */
+export function setRainPan(x: number): void {
+  if (!TILT_FX) return;
+  const v = Math.max(-1, Math.min(1, x)) * 0.3;
+  if (Math.abs(v - _rainPanV) < 0.01) return;
+  _rainPanV = v;
+  if (rainPan && sx) rainPan.pan.setTargetAtTime(v, sx.currentTime, 0.4);
+}
 const deckG: (GainNode | null)[] = [null, null];
 const deckV = [0, 0];
 let dk = 0, bgmOrder: number[] = [], bgmPos = 0, bgmLast = -1;
@@ -77,7 +88,10 @@ function sxInit(): void {
 function tryRoute(): void {
   if (routed || !sx || sx.state !== 'running' || !sxMaster) return;
   try {
-    const rs = sx.createMediaElementSource(rain); rainG = sx.createGain(); rs.connect(rainG); rainG.connect(sxMaster);
+    const rs = sx.createMediaElementSource(rain); rainG = sx.createGain(); rs.connect(rainG);
+    // beta 2026-10-19（tilt）: 雨を傾きで左右へ ±0.3 振る。切なら従来どおり直結
+    if (TILT_FX && sx.createStereoPanner) { rainPan = sx.createStereoPanner(); rainPan.pan.value = _rainPanV; rainG.connect(rainPan); rainPan.connect(sxMaster); }
+    else rainG.connect(sxMaster);
     toReverb(rainG);
     decks.forEach((d, i) => { const src = sx!.createMediaElementSource(d); deckG[i] = sx!.createGain(); src.connect(deckG[i]!); deckG[i]!.connect(sxMaster!); });
     routed = true;
@@ -86,7 +100,7 @@ function tryRoute(): void {
   } catch { routed = false; }
 }
 // ---- 書斎の残響と遠くの柱時計（beta 2026-10-19）----
-//  スイッチ：localStorage 'bookexp-beta-fx' {reverb:boolean}（既定 true）／ ?fx=0 で全部 OFF ／ ?reverb=0|1 で個別。
+//  スイッチ：?reverb=1 の時だけ（2026-10-19 KEI「いらない」で既定 OFF・パネルから外した）。
 //  OFF の時は残響も柱時計も作らない＝従来と完全に同じ経路・同じ音量。
 //  残響を通すのは 雨・押下音・柱時計 だけ。めくり音・印・栞は KEI 確認待ちなので通さない。
 function fxReverb(): boolean {
@@ -95,11 +109,8 @@ function fxReverb(): boolean {
     const r = q.get('reverb'); if (r === '0') return false; if (r === '1') return true;
     if (q.get('fx') === '0') return false;
   } catch { /* noop */ }
-  try {
-    const o = JSON.parse(localStorage.getItem('bookexp-beta-fx') || 'null');
-    if (o && typeof o.reverb === 'boolean') return o.reverb;
-  } catch { /* noop */ }
-  return true;
+  // 2026-10-19 KEI「残響と柱時計はいらない」→ 既定 false。前に保存した {reverb:true} も無視（?reverb=1 の時だけ作る）
+  return false;
 }
 const FX_REVERB = fxReverb();
 const REV_WET = 0.11, REV_DUR = 1.05;
@@ -549,8 +560,28 @@ export function toggleSound(): void {
   }
 }
 
-/** 触覚（対応端末だけ） */
-export function haptic(p: number | number[]): void { try { if (navigator.vibrate) navigator.vibrate(p); } catch { /* noop */ } }
+/** 触覚（対応端末だけ）。
+ *  ios=true の呼び出し（印・栞・2回タップ・押下音）だけ、navigator.vibrate の無い端末（iPhone）では web-haptics で代わりに鳴らす。
+ *  web-haptics は iOS の「スイッチ型チェックボックス」を押させるハック。ユーザー操作の中でしか効かない＝めくりには付けない。
+ *  スイッチ haptic（beta 2026-10-19・既定 入）。実機で効くかは要確認 */
+const HAPTIC_FX = fxOn('haptic');
+let wh: WebHaptics | null = null;
+function hapticIOS(p: number | number[]): void {
+  if (!HAPTIC_FX) return;
+  try {
+    if (!wh) wh = new WebHaptics();
+    // navigator.vibrate の形（[鳴, 休, 鳴, …] ms）→ web-haptics の形。強さは単発=軽く、パターン=強めに
+    const arr = Array.isArray(p) ? p : [p], v: { duration: number; intensity: number; delay?: number }[] = [];
+    for (let i = 0; i < arr.length; i += 2) v.push({ duration: Math.max(10, arr[i]), intensity: arr.length > 1 ? 0.8 : 0.5, ...(i ? { delay: arr[i - 1] } : {}) });
+    wh.trigger(v).catch(() => {});
+  } catch { /* noop */ }
+}
+export function haptic(p: number | number[], ios = false): void {
+  try { if (navigator.vibrate) { navigator.vibrate(p); return; } } catch { /* noop */ }
+  if (ios) hapticIOS(p);
+}
+/** 2回タップ用: Android は開く台本の haptic(8) が鳴るので、ここでは iPhone だけ（ユーザー操作の中で呼ぶ） */
+export function hapticTapIOS(p: number): void { try { if (typeof navigator.vibrate === 'function') return; } catch { /* noop */ } hapticIOS(p); }
 
 export function initAudioGlobalHooks(): void {
   applySoundFlags();
@@ -559,7 +590,11 @@ export function initAudioGlobalHooks(): void {
   document.addEventListener('click', e => {
     const t = e.target as Element | null;
     const b = t && t.closest ? t.closest('button, [role="button"]') as HTMLButtonElement | null : null;
-    if (b && !b.disabled) tapSound();
+    if (b && !b.disabled) {
+      tapSound();
+      // beta（haptic）: 押下音と一緒に軽く。印・栞はそれぞれの処理が鳴らすので重ねない
+      if (HAPTIC_FX && b.id !== 'favBtn' && b.id !== 'favListBtn') haptic(5, true);
+    }
   }, true);
   (['pointerdown', 'touchend', 'click', 'keydown'] as const).forEach(ev => addEventListener(ev, ensureAudio, { passive: true }));
   (['touchend', 'click', 'pointerup'] as const).forEach(ev => addEventListener(ev, () => {

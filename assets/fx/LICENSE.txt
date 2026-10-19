@@ -1,0 +1,14 @@
+assets/fx/ — 光の粒のスプライト（2026-10-19 beta）
+
+すべて Kenney「Particle Pack 1.1」由来（Kenney Vleugels / kenney.nl）
+  https://kenney.nl/assets/particle-pack
+  License: Creative Commons Zero (CC0) http://creativecommons.org/publicdomain/zero/1.0/
+  （クレジットは任意。ここに記す）
+
+  bokeh.png  ← light_01.png  （512px → 256px・グレースケール）ボケ玉（motes=a）
+  glow.png   ← circle_05.png （→128px）柔らかい光の玉（遠いボケ・ほたる motes=c）
+  ember.png  ← trace_05.png  （→128px）細い光の筋・火の粉（motes=b）
+  speck.png  ← smoke_05.png  （→128px）不定形の埃（塵）
+
+元 zip: D:\kei-work\2026-10-19_meigen-beta\dl\kenney\kenney_particle-pack.zip
+（Kenney Smoke Particles も同所に取得・未使用）

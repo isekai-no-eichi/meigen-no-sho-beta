@@ -21,6 +21,9 @@ import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { asset, MOBILE, QP, BUILD, PERF, loadFavs, hasBookmark, isUnlocked, fxOn } from '../state';
 import { SmokeShader, EtchShader, applySurfaceEtch, type SurfaceEtchUniforms } from './BetaFx';
 import { RoomBackground } from './RoomBackground';
+import { MOTES, MOTES_COUNT_K, MOTES_SPEED, MOTES_WIND_X, equipSprites, Fireflies } from './Motes';
+/** beta 2026-10-19: 傾きで灯りがゆっくり滑る（スイッチ tilt）。切なら従来の傾き追従だけ */
+const TILT_FX = fxOn('tilt');
 
 /** 表紙の箔押しタイトル「名言の書」。2026-09-08 KEI「チャチい」→ 無し。戻す時は true */
 const TITLE_DECAL = false;
@@ -108,7 +111,7 @@ const FX_ON = true, GLOW_ON = true;   // 2026-09-24 KEI 復活（光と一緒に
 /** 光の粒: 1波目（本の中心から放射）／2波目（ゆっくり昇る塵）の出る時刻と寿命（秒） */
 const FX_WAVE1 = 1.0, FX_WAVE2 = 4.0, FX_LIFE = 6.0;   // 出現8秒に合わせて2.5倍寄せ（旧 0.4/1.6/4.5）
 /** 粒の総数（大粒と小粒に分けて撒く） */
-const FX_N = MOBILE ? 160 : 260;
+const FX_N = MOTES === 'c' ? 0 : Math.round((MOBILE ? 160 : 260) * MOTES_COUNT_K);   // beta: スプライト化で 6.5 割・c は撒かない
 /** 出現しきる少し前から、金の淡い発光をブルームに足す（+30%）。戻すのに2秒 */
 const GLOW_LEAD = 2.0, GLOW_GAIN = 0.30, GLOW_FALL = 3.0;   // ゆっくり持ち上げ・上品に+30%のまま（旧 0.8/0.30/2.0）
 /** 滑らかなS字（smootherstep）。最初はごく小さく静かに、中盤でふわっと大きくなる */
@@ -169,7 +172,9 @@ export class BookScene {
   private motes: THREE.Points;
   private mGeo = new THREE.BufferGeometry();
   private mPos: Float32Array; private mVel: Float32Array; private mLife: Float32Array;
-  private MN = MOBILE ? 280 : 480;
+  private MN = Math.round((MOBILE ? 280 : 480) * MOTES_COUNT_K);
+  private flies: Fireflies | null = null;       // ?motes=c のほたる
+  private tiltSlow = { x: 0, y: 0 };            // beta: 傾きを時間でなました値（TILT_FX）
   private motesOn = false; private moteT = 0;
 
   // ---- 合言葉のあとの本の出現（2026-09-21 KEI） ----
@@ -247,6 +252,8 @@ export class BookScene {
     this.dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos, 3));
     this.dust = new THREE.Points(this.dustGeo, new THREE.PointsMaterial({ color: 0xd8b878, size: 0.0035, transparent: true, opacity: 0.55, depthWrite: false }));
     this.scene.add(this.dust);
+    if (MOTES !== 'old') equipSprites(this.dust, 'speck', 0.0065, { sizeMin: 0.35, sizeMax: 1.5, range: 1.2 });
+    if (MOTES === 'c') this.flies = new Fireflies(this.scene);
 
     // 吸い込みの光の粒
     this.mPos = new Float32Array(this.MN * 3); this.mVel = new Float32Array(this.MN * 3); this.mLife = new Float32Array(this.MN);
@@ -262,6 +269,7 @@ export class BookScene {
     }));
     this.motes.visible = false;
     this.camera.add(this.motes);
+    if (MOTES !== 'old') equipSprites(this.motes, MOTES === 'b' ? 'ember' : 'bokeh', MOTES === 'b' ? 0.016 : 0.011, { vel: this.mVel, focus: 0.9, range: 0.8 });
 
     // 合言葉のあとに散る金の粒。大粒と小粒を混ぜ、1波目=放射／2波目=ゆっくり昇る塵
     const fxTex = new THREE.CanvasTexture(c);
@@ -653,6 +661,7 @@ export class BookScene {
     }));
     pts.visible = false;
     this.scene.add(pts);
+    if (MOTES !== 'old') equipSprites(pts, MOTES === 'b' ? 'ember' : 'bokeh', size * (MOTES === 'b' ? 2.8 : 1.8), { vel });
     return { pts, geo, pos, vel, n, at, rise, t: -1 };
   }
 
@@ -718,11 +727,11 @@ export class BookScene {
       b.t += dt;
       const k = Math.min(b.t / FX_LIFE, 1), drag = Math.exp(-dt / (b.rise ? 2.4 : 0.9));
       for (let i = 0; i < b.n; i++) {
-        b.vel[i * 3] *= drag; b.vel[i * 3 + 2] *= drag;
+        b.vel[i * 3] = b.vel[i * 3] * drag + MOTES_WIND_X * dt; b.vel[i * 3 + 2] *= drag;
         b.vel[i * 3 + 1] = b.vel[i * 3 + 1] * drag + 0.010 * dt;     // 最後はゆっくり昇る
-        b.pos[i * 3] += b.vel[i * 3] * dt;
-        b.pos[i * 3 + 1] += b.vel[i * 3 + 1] * dt;
-        b.pos[i * 3 + 2] += b.vel[i * 3 + 2] * dt;
+        b.pos[i * 3] += b.vel[i * 3] * dt * MOTES_SPEED;
+        b.pos[i * 3 + 1] += b.vel[i * 3 + 1] * dt * MOTES_SPEED;
+        b.pos[i * 3 + 2] += b.vel[i * 3 + 2] * dt * MOTES_SPEED;
       }
       b.geo.attributes.position.needsUpdate = true;
       (b.pts.material as THREE.PointsMaterial).opacity = 0.8 * Math.min(1, b.t / 0.45) * (1 - k) * (1 - k * 0.25);
@@ -874,6 +883,11 @@ export class BookScene {
     this.tiltCur.x += (this.tiltRaw.x - this.tiltCur.x) * tk;
     this.tiltCur.y += (this.tiltRaw.y - this.tiltCur.y) * tk;
     this.candleB.position.set(0.28 + this.tiltCur.x * 0.22, 0.34 + this.tiltCur.y * 0.12, 0.30 - this.tiltCur.y * 0.15);
+    if (TILT_FX) {   // beta: 1.2秒でなました傾きぶん、灯りがさらに少し滑る（本の照りがゆっくり追ってくる）
+      const ks = 1 - Math.exp(-wdt / 1.2);
+      this.tiltSlow.x += (this.tiltCur.x - this.tiltSlow.x) * ks; this.tiltSlow.y += (this.tiltCur.y - this.tiltSlow.y) * ks;
+      this.candleB.position.x += this.tiltSlow.x * 0.10; this.candleB.position.y += this.tiltSlow.y * 0.05; this.candleB.position.z -= this.tiltSlow.x * 0.05;
+    }
     this.candleB.intensity = (CANDLE_I + Math.sin(t * 0.71) * 0.18 + Math.sin(t * 1.63 + 1.1) * 0.11 + Math.sin(t * 0.29 + 2.4) * 0.14 + this.shake * 0.6)
       * (1 - this.openFlare * 0.80);                 // 開く瞬間は書斎の灯りを引き、光を本の中に集める
     // 端末を傾けると縁の光の向きが動く（±8°ぶん）
@@ -924,6 +938,7 @@ export class BookScene {
       this.ribbon.rotation.y = RIB_YAW + Math.sin(t * 0.7) * 0.03 + this.shake * Math.sin(t * 40) * 0.08;
     }
     this.motesStep(wdt);
+    if (this.flies) this.flies.step(wdt, t, this.pivot.position, this.camera.position, this.dust.visible && !ICON, Math.min(1, this.bookScale));
 
     const sx0 = this.shake * Math.sin(t * 57) * 0.012, sy0 = this.shake * Math.sin(t * 43 + 1) * 0.008;
     const cam = this.camera;

@@ -20,6 +20,7 @@ import { track } from './track';
 import { initCounter } from './counter';
 import { fsEnter, fsOn } from './fullscreen';
 import { initBetaPanel } from './ui/BetaPanel';
+import { setRainPan } from './audio';
 import { showRetry } from './ui/Retry';
 
 type Stage = 'book' | 'opening' | 'read' | 'closing';
@@ -315,6 +316,7 @@ function listenTilt(): void {
     if (ev.gamma == null || ev.beta == null) return;
     scene.tiltRaw.x = Math.max(-1, Math.min(1, ev.gamma / 35));
     scene.tiltRaw.y = Math.max(-1, Math.min(1, (ev.beta - 45) / 35));
+    setRainPan(scene.tiltRaw.x);                 // beta（tilt）: 雨が左右へ動く
   }, { passive: true });
   reader.listenTilt();
 }

@@ -385,11 +385,44 @@ body.stage-book #readTitle{display:none}
 #betaPanel .bclose{display:block;margin:10px auto 4px;background:rgba(0,0,0,.28);border:1px solid rgba(201,162,74,.45);color:var(--gold2);
   padding:10px 32px;letter-spacing:.3em;text-indent:.3em;font-family:var(--serif);font-size:clamp(12.5px,3.6vmin,14.5px);cursor:pointer;border-radius:1px}
 #betaPanel .bclose:active,#betaPanel .bsw button:active{color:#fff2c4}
-/* 「読み込めなかった　もう一度」: #hint と同じ位置・書体。押せる文字 */
-#retry{position:fixed;left:50%;top:66%;top:66dvh;transform:translate(-50%,-50%);z-index:40;display:none;flex-direction:column;align-items:center;
-  background:none;border:0;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
-#retry.show{display:flex}
-#retry .txt{font-family:var(--serif);font-size:clamp(14px,4vmin,19px);letter-spacing:.26em;text-indent:.26em;font-weight:400;color:var(--gold2);
-  white-space:nowrap;text-shadow:0 1px 2px #000,0 0 12px rgba(0,0,0,.8)}
-#retry .rule{display:block;width:min(46vw,260px);height:1px;margin:14px auto 0;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
-#retry:active .txt{color:#fff2c4}
+/* 読み込み失敗の札（ui/Retry.ts・2026-10-20 KEI「読み込み出来ない時に出るメッセージ」）
+   古い紙の小さな札。紙は CSS のグラデーションだけで描き、backside.jpg は重ねるだけ（オフラインで画像が取れなくても札は紙に見える）。
+   書体は合言葉と同じ明朝。ボタンは文字だけ「もう一度」。後ろの本は見えたまま（札の外は押せる）。 */
+#retry{position:fixed;left:50%;top:64%;top:64dvh;transform:translate(-50%,-50%);z-index:40;display:none;pointer-events:none;
+  width:min(calc(100vw - 32px),300px)}
+/* 書斎の一部：本は読めるので、本と「2回タップ」の案内・下のボタンを避けて上端に小さく */
+#retry[data-kind="part"]{top:calc(env(safe-area-inset-top,0px) + 46px);transform:translate(-50%,0);width:min(calc(100vw - 32px),330px)}
+#retry[data-kind="part"] .rcard{padding:12px 16px 6px}
+#retry[data-kind="part"] .rbtn{margin-top:6px;padding:6px 14px 7px}
+#retry.show{display:block;animation:rcardIn .9s ease-out both}
+@keyframes rcardIn{from{opacity:0;filter:blur(6px);transform:translate(-50%,-46%)}to{opacity:1;filter:blur(0);transform:translate(-50%,-50%)}}
+#retry[data-kind="part"].show{animation:rcardInB .9s ease-out both}
+@keyframes rcardInB{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:blur(0)}}
+#retry .rcard{pointer-events:auto;position:relative;box-sizing:border-box;padding:22px 20px 14px;text-align:center;color:#2b1d0f;
+  background:
+    radial-gradient(120% 90% at 50% 45%,rgba(0,0,0,0) 55%,rgba(74,46,16,.38) 100%),
+    url(../assets/backside.jpg) center/cover,
+    radial-gradient(140% 120% at 30% 20%,#ead9b0 0%,#d9c393 55%,#bfa26c 100%);
+  background-blend-mode:normal,multiply,normal;
+  border-radius:2px;
+  box-shadow:0 0 0 1px rgba(60,38,14,.35) inset,0 0 18px rgba(80,50,18,.35) inset,0 14px 34px rgba(0,0,0,.7),0 2px 6px rgba(0,0,0,.5);}
+#retry .rh{margin:0;white-space:nowrap;font-family:var(--serif);font-size:clamp(14.5px,4.2vmin,18px);line-height:1.7;letter-spacing:.12em;text-indent:.12em;font-weight:500;color:#2b1d0f}
+#retry .rs{margin:4px 0 0;font-family:var(--serif);font-size:clamp(13px,3.7vmin,15px);line-height:1.7;letter-spacing:.12em;text-indent:.12em;color:#4a3519}
+#retry .rbtn{display:block;margin:12px auto 0;padding:8px 14px 9px;background:none;border:0;border-top:1px solid rgba(60,38,14,.32);cursor:pointer;
+  font-family:var(--serif);font-size:clamp(13.5px,3.9vmin,16px);letter-spacing:.34em;text-indent:.34em;color:#6a2f12;-webkit-tap-highlight-color:transparent;
+  width:72%;transition:color .18s}
+#retry .rbtn:active{color:#2b1d0f}
+#retry.off .rbtn{color:#4a3519}
+/* 札が出ている間は「読み込み中」を隠す（二つの知らせを重ねない） */
+body.lfail #rload{opacity:0!important;visibility:hidden}
+/* 保存できなかった時の一行（印・栞・1回だけ） */
+/* 読書の下ボタン列（高さ 80px）のすぐ上・紙の外の暗い所に出す */
+#storeNote{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 1.2dvh + 96px);transform:translate(-50%,0);z-index:41;pointer-events:none;white-space:nowrap;
+  font-family:var(--serif);font-size:clamp(13px,3.7vmin,15px);letter-spacing:.14em;color:var(--paper);
+  text-shadow:0 1px 3px #000,0 0 14px rgba(0,0,0,.9);opacity:0;transition:opacity .8s ease}
+#storeNote.show{opacity:.95}
+/* 試作版パネルの「振動を試す」 */
+#betaPanel .bsw button.bhap{color:var(--gold2);border-color:rgba(201,162,74,.6)}
+#betaPanel .bhapres:empty{display:none}
+/* 合言葉を間違えた時の全選択は、OS の青でなく金の薄塗り（2026-10-20） */
+#gate .gfield::selection{background:rgba(201,162,74,.34);color:#fff2c4}

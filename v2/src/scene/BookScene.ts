@@ -19,7 +19,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { asset, MOBILE, QP, BUILD, PERF, loadFavs, hasBookmark, isUnlocked, fxOn } from '../state';
-import { SmokeShader, EtchShader } from './BetaFx';
+import { SmokeShader, EtchShader, applySurfaceEtch, type SurfaceEtchUniforms } from './BetaFx';
 import { RoomBackground } from './RoomBackground';
 
 /** 表紙の箔押しタイトル「名言の書」。2026-09-08 KEI「チャチい」→ 無し。戻す時は true */
@@ -186,6 +186,7 @@ export class BookScene {
   private bokehPass: BokehPass | null = null;
   private gradePass: ShaderPass | null = null;
   private etchPass: ShaderPass | null = null;
+  private etchMats: { u: SurfaceEtchUniforms; mesh: THREE.Mesh }[] = [];
   private smoke: THREE.Mesh | null = null;
   private perfN = 0; private perfT = 0; private perfDone = false;
 
@@ -303,6 +304,7 @@ export class BookScene {
         }
       });
       if (QUALITY) this.applyLeather(book);
+      if (FX_ETCH) this.applyEtch(book);
       const cover = book.getObjectByName('Cover_Front');
       if (cover) {
         const bb = new THREE.Box3().setFromObject(cover);
@@ -350,6 +352,36 @@ export class BookScene {
         mat.roughnessMap = rgh; mat.roughness = 1.0; mat.envMapIntensity = 0.35 * ENV_K; mat.needsUpdate = true;
       }
     });
+  }
+  /** etch: 表紙・背・紙の束のマテリアルに「表面に彫る線」を差し込む（2026-10-19 夜 beta・BetaFx.applySurfaceEtch） */
+  private applyEtch(root: THREE.Object3D): void {
+    const amt = qn('etamt', 1.0), gain = qn('etgain', 0.55);
+    root.traverse(o => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.material) return;
+      (Array.isArray(m.material) ? m.material : [m.material]).forEach(mat => {
+        // 小口は1方向目を紙の重なりと平行に（+0.95 で 1方向目が π/2 = 水平の線）
+        const u: SurfaceEtchUniforms = { uEtS: { value: 0.01 }, uEtAmt: { value: amt }, uEtGain: { value: gain }, uEtRot: { value: mat.name === 'M_Pages' ? 0.95 : 0 } };
+        applySurfaceEtch(mat, u);
+        this.etchMats.push({ u, mesh: m });
+      });
+    });
+    this.etchSpacing();
+  }
+  /** 線の間隔: 入口の距離（CAM_R）で画面上 約3 CSS px（?etpx= で試せる）。ジオメトリ空間の長さに直して渡す */
+  private etchSpacing(): void {
+    if (!this.etchMats.length) return;
+    const perPx = 2 * CAM_R * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) / Math.max(1, innerHeight);
+    const px = qn('etpx', 3.2);
+    // 入口の演出で pivot の縮尺は 0→1 と動くので、pivot から下の縮尺だけで測る（静止時 = pivot 1）
+    const ws = new THREE.Vector3(), ps = new THREE.Vector3();
+    this.pivot.updateWorldMatrix(true, false); this.pivot.getWorldScale(ps);
+    const pk = Math.max(1e-6, (Math.abs(ps.x) + Math.abs(ps.y) + Math.abs(ps.z)) / 3);
+    for (const e of this.etchMats) {
+      e.mesh.updateWorldMatrix(true, false); e.mesh.getWorldScale(ws);
+      const k = (Math.abs(ws.x) + Math.abs(ws.y) + Math.abs(ws.z)) / 3 / pk;
+      e.u.uEtS.value = perPx * px / Math.max(1e-6, k);
+    }
   }
   /** pbr: 紙の束。小口（M_Pages）は1枚ずつの重なりの法線、上面（M_PageTop）は紙の凹凸を薄く（2026-10-19 beta） */
   private applyPagesPbr(root: THREE.Object3D, tl: THREE.TextureLoader): void {
@@ -787,6 +819,7 @@ export class BookScene {
       this.setBloomSize();
       if (this.etchPass) this.etchPass.uniforms.uPx.value = this.renderer.getPixelRatio();
     }
+    this.etchSpacing();
   }
 
   /**

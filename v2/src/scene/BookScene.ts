@@ -21,7 +21,8 @@ import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { asset, MOBILE, QP, BUILD, PERF, loadFavs, hasBookmark, isUnlocked, fxOn } from '../state';
 import { SmokeShader, EtchShader, applySurfaceEtch, type SurfaceEtchUniforms } from './BetaFx';
 import { RoomBackground } from './RoomBackground';
-import { MOTES, MOTES_COUNT_K, MOTES_SPEED, MOTES_WIND_X, equipSprites, Fireflies } from './Motes';
+import { MOTES, MOTES_COUNT_K, MOTES_SPEED, MOTES_WIND_X, equipSprites, Fireflies, equipGlow, GraceMotes, GLOW_U } from './Motes';
+import { DiveBlurShader, diveBlurAmt } from './DiveBlur';
 /** beta 2026-10-19: 傾きで灯りがゆっくり滑る（スイッチ tilt）。切なら従来の傾き追従だけ */
 const TILT_FX = fxOn('tilt');
 
@@ -64,6 +65,8 @@ const FX_PBR = fxOn('pbr');
 const FX_SMOKE = fxOn('smoke');
 /** etch: 3Dの画面を銅版画風に（ハッチング＋輪郭・既定 OFF） */
 const FX_ETCH = fxOn('etch');
+/** dive: 潜る時の放射ぼかし（2026-10-20・DiveBlur.ts） */
+const FX_DIVE = fxOn('dive');
 /** cover: 表紙が本当に開く本（book_open.glb・CoverHinge/PageHinge＋クリップ CoverOpen 2.0s/FirstPage 1.6s）。2026-10-19 KEI「⑤表紙が開いてから潜る」 */
 export const FX_COVER = fxOn('cover');
 /** cover: 見返し・1枚目・紙の束の上面を羊皮紙に（Blender の M_Endpaper/M_PageTop は表紙内側の橙で明るすぎた） */
@@ -239,6 +242,8 @@ export class BookScene {
   private mPos: Float32Array; private mVel: Float32Array; private mLife: Float32Array;
   private MN = Math.round((MOBILE ? 280 : 480) * MOTES_COUNT_K);
   private flies: Fireflies | null = null;       // ?motes=c のほたる
+  private grace: GraceMotes | null = null;      // ?motes=d の漂う光
+  private graceBoxT = 0;
   private tiltSlow = { x: 0, y: 0 };            // beta: 傾きを時間でなました値（TILT_FX）
   private motesOn = false; private moteT = 0;
 
@@ -256,6 +261,7 @@ export class BookScene {
   private bokehPass: BokehPass | null = null;
   private gradePass: ShaderPass | null = null;
   private etchPass: ShaderPass | null = null;
+  private divePass: ShaderPass | null = null; private divePrimed = false;
   private etchMats: { u: SurfaceEtchUniforms; mesh: THREE.Mesh }[] = [];
   private smoke: THREE.Mesh | null = null;
   private perfN = 0; private perfT = 0; private perfDone = false;
@@ -317,7 +323,8 @@ export class BookScene {
     this.dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos, 3));
     this.dust = new THREE.Points(this.dustGeo, new THREE.PointsMaterial({ color: 0xd8b878, size: 0.0035, transparent: true, opacity: 0.55, depthWrite: false }));
     this.scene.add(this.dust);
-    if (MOTES !== 'old') equipSprites(this.dust, 'speck', 0.0065, { sizeMin: 0.35, sizeMax: 1.5, range: 1.2 });
+    if (MOTES === 'd') { (this.dust.material as THREE.Material).visible = false; this.grace = new GraceMotes(this.scene, this.camera); }   // d: 塵は漂う光が兼ねる
+    else if (MOTES !== 'old') equipSprites(this.dust, 'speck', 0.0065, { sizeMin: 0.35, sizeMax: 1.5, range: 1.2 });
     if (MOTES === 'c') this.flies = new Fireflies(this.scene);
 
     // 吸い込みの光の粒
@@ -334,7 +341,8 @@ export class BookScene {
     }));
     this.motes.visible = false;
     this.camera.add(this.motes);
-    if (MOTES !== 'old') equipSprites(this.motes, MOTES === 'b' ? 'ember' : 'bokeh', MOTES === 'b' ? 0.016 : 0.011, { vel: this.mVel, focus: 0.9, range: 0.8 });
+    if (MOTES === 'd') equipGlow(this.motes, 0.010, { focus: 0.9, range: 0.8, floor: 0.45, lightR: 0.6 });
+    else if (MOTES !== 'old') equipSprites(this.motes, MOTES === 'b' ? 'ember' : 'bokeh', MOTES === 'b' ? 0.016 : 0.011, { vel: this.mVel, focus: 0.9, range: 0.8 });
 
     // 合言葉のあとに散る金の粒。大粒と小粒を混ぜ、1波目=放射／2波目=ゆっくり昇る塵
     const fxTex = new THREE.CanvasTexture(c);
@@ -833,7 +841,8 @@ export class BookScene {
     }));
     pts.visible = false;
     this.scene.add(pts);
-    if (MOTES !== 'old') equipSprites(pts, MOTES === 'b' ? 'ember' : 'bokeh', size * (MOTES === 'b' ? 2.8 : 1.8), { vel });
+    if (MOTES === 'd') equipGlow(pts, size * 1.5, { floor: 0.35, lightR: 0.5 });
+    else if (MOTES !== 'old') equipSprites(pts, MOTES === 'b' ? 'ember' : 'bokeh', size * (MOTES === 'b' ? 2.8 : 1.8), { vel });
     return { pts, geo, pos, vel, n, at, rise, t: -1 };
   }
 
@@ -959,6 +968,11 @@ export class BookScene {
       this.etchPass = new ShaderPass(EtchShader);
       this.etchPass.uniforms.uPx.value = this.renderer.getPixelRatio();
       this.composer.addPass(this.etchPass);
+    }
+    if (FX_DIVE) {                                   // dive: 潜る間だけ動く放射ぼかし（普段は enabled=false）
+      this.divePass = new ShaderPass(DiveBlurShader);
+      this.divePass.enabled = false;
+      this.composer.addPass(this.divePass);
     }
     this.gradePass = new ShaderPass(GradeShader);
     if (QP.get('q_vig')) this.gradePass.uniforms.uVig.value = +QP.get('q_vig')!;
@@ -1110,6 +1124,7 @@ export class BookScene {
       this.ribbon.rotation.y = RIB_YAW + Math.sin(t * 0.7) * 0.03 + this.shake * Math.sin(t * 40) * 0.08;
     }
     this.motesStep(wdt);
+    if (this.grace) this.graceStep(wdt, t);
     if (this.flies) this.flies.step(wdt, t, this.pivot.position, this.camera.position, this.dust.visible && !ICON, Math.min(1, this.bookScale));
 
     const sx0 = this.shake * Math.sin(t * 57) * 0.012, sy0 = this.shake * Math.sin(t * 43 + 1) * 0.008;
@@ -1165,6 +1180,19 @@ export class BookScene {
       cam.lookAt(this.tiltCur.x * 0.02 + hx, this.tiltCur.y * 0.015 + hy, 0);
     }
 
+    if (this.divePass) {   // dive: 潜りの最初の 40% で入り、暗転まで保つ。潜っていない時は止める
+      const amt = opts.diving ? diveBlurAmt(opts.diveT / DIVE_DUR) : 0;
+      // 最初の1コマだけ強さ 0 で通しておく（シェーダーの準備を潜りの瞬間にしない＝引っかかり防止。見た目は変わらない）
+      this.divePass.enabled = amt > 0.001 || !this.divePrimed;
+      this.divePrimed = true;
+      if (this.divePass.enabled) {
+        const u = this.divePass.uniforms;
+        cam.updateMatrixWorld();
+        this._dv.copy(this.pivot.position).project(cam);
+        u.uCenter.value.set(Math.max(0.15, Math.min(0.85, this._dv.x * 0.5 + 0.5)), Math.max(0.15, Math.min(0.85, this._dv.y * 0.5 + 0.5)));
+        u.uAspect.value = cam.aspect; u.uAmt.value = amt; u.uTime.value = t;
+      }
+    }
     if (this.bookScale > 0.002 || this.keepAmbience) {
       if (this.composer) this.composer.render(); else this.renderer.render(this.scene, cam);
     }
@@ -1189,12 +1217,40 @@ export class BookScene {
     cam.lookAt(P.x + (0 - P.x) * f, P.y + (ty - P.y) * f, P.z + (0 - P.z) * f);
   }
 
+  private _dv = new THREE.Vector3();
+  /** d: 漂う光の共有 uniform（光だまり・明滅・本の箱・時刻）を入れる */
+  private graceStep(wdt: number, t: number): void {
+    const P = this.pivot.position, C = this.candleB.position;
+    GLOW_U.uLight.value.set(P.x + (C.x - P.x) * 0.5, P.y + (C.y - P.y) * 0.5, P.z + (C.z - P.z) * 0.5);
+    GLOW_U.uFlicker.value = this.candleB.intensity / CANDLE_I;
+    GLOW_U.uTime.value = t;
+    this.renderer.getDrawingBufferSize(this._v2);
+    GLOW_U.uViewH.value = this._v2.y;
+    if (this.book && (t - this.graceBoxT > 0.25 || t < this.graceBoxT)) {   // 本の箱は 4Hz で十分（開く時は表紙が動く）
+      this.graceBoxT = t;
+      // 本の部品（名前のあるメッシュ）だけ。影の受け板や栞（名前なし）は入れない
+      this._bb.makeEmpty();
+      this.book.traverse(o => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.name || !m.visible) return;
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        this._bb2.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld);
+        this._bb.union(this._bb2);
+      });
+      if (!this._bb.isEmpty()) { this._bb.getCenter(GLOW_U.uBoxC.value); this._bb.getSize(GLOW_U.uBoxH.value).multiplyScalar(0.5); }
+    }
+    this.grace!.step(wdt, this.dust.visible && !ICON, Math.min(1, this.bookScale));
+  }
+  private _v2 = new THREE.Vector2();
+  private _bb = new THREE.Box3(); private _bb2 = new THREE.Box3();
+
   /** 開く演出が終わったら描画設定を平常へ戻す */
   resetOpenFX(): void {
     if (this.camera.fov !== 38) { this.camera.fov = 38; this.camera.updateProjectionMatrix(); }
     this.openFlare = 0; this.gild = 0;
     this.flareA.intensity = 0; this.flareB.intensity = 0;
     if (this.bloomPass) this.bloomPass.strength = BLOOM_BASE;
+    if (this.divePass) { this.divePass.enabled = false; this.divePass.uniforms.uAmt.value = 0; }
     this.renderer.toneMappingExposure = 0.72;
     if (this.gradePass) this.gradePass.uniforms.uVig.value = QP.get('q_vig') ? +QP.get('q_vig')! : 0.30;
     if (this.titleSweep) this.titleSweep.visible = false;

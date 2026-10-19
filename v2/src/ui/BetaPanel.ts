@@ -8,6 +8,7 @@ import { hapticTest } from '../audio';
 
 const ROWS: [FxKey, string][] = [
   ['cover', '表紙が開いてから潜る'],
+  ['dive', '潜る時に画面がにじむ'],
   ['env', '暖炉の反射'],
   ['pbr', '革と紙の質感'],
   ['smoke', 'ろうそくの煙'],

@@ -158,9 +158,10 @@ try {
 // ---- 試作スイッチ（2026-10-19 beta・入口の3D演出と音）----
 //   優先順: ?fx=0 → 全部 false ／ ?<k>=0|1 → 個別 ／ localStorage 'bookexp-beta-fx'（JSON）／ FX_DEFAULT
 //   音係（audio/index.ts）も同じキー 'bookexp-beta-fx' を自前で読む。キー名と形（{env:true,...}）は変えない。
-export type FxKey = 'env' | 'pbr' | 'smoke' | 'etch' | 'reverb' | 'tilt' | 'haptic' | 'cover';
+export type FxKey = 'env' | 'pbr' | 'smoke' | 'etch' | 'reverb' | 'tilt' | 'haptic' | 'cover' | 'dive';
 // 2026-10-19 KEI「残響と柱時計はいらない」→ reverb 既定 false・パネルから外した（?reverb=1 の時だけ作る）
-export const FX_DEFAULT: Record<FxKey, boolean> = { env: true, pbr: true, smoke: false, etch: false, reverb: false, tilt: true, haptic: true, cover: true };
+export const FX_DEFAULT: Record<FxKey, boolean> = { env: true, pbr: true, smoke: false, etch: false, reverb: false, tilt: true, haptic: true, cover: true, dive: true };
+// dive: 2026-10-20 KEI「吸い込まれる時に FF10 の遭遇みたいに少しにじむ」→ scene/DiveBlur.ts。?dive=0 で無し
 // cover: 2026-10-19 KEI「⑤表紙が開いてから潜る」→ book_open.glb（CoverHinge/PageHinge＋クリップ CoverOpen/FirstPage）と別台本。?cover=0 で旧 book.glb・旧台本
 export const FX_KEY = 'bookexp-beta-fx';
 export function fxOn(k: FxKey): boolean {

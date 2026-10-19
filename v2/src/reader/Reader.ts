@@ -11,6 +11,8 @@
 import { K, asset, MOBILE, QP, PERF, S, loadFavs, saveFavs, loadBookmark, saveBookmark, clearBookmark, bookmarkPages, removeBookmarkPage, fxOn, type Bookmark } from '../state';
 import { pageSound, sealSound, ribbonSound, haptic, ensureAudio } from '../audio';
 import { showRetry, hideRetry } from '../ui/Retry';
+/** 2026-10-20 beta: 「読み込み中」がこの長さ続いたら、届いていないと知らせる（届けば自然に消える） */
+const LOAD_WAIT_MS = 12000;
 /** beta 2026-10-19: 傾きで灯りの中心を少し大きく動かす（スイッチ tilt） */
 const TILT_FX = fxOn('tilt');
 
@@ -269,6 +271,24 @@ export class Reader {
   private syncLoading(): void {
     const need = this.opened && (!this.pg(this.index) || this.pendingFlip !== 0);
     this.el.load.classList.toggle('show', need);
+    // 2026-10-20 beta（KEI「読み込み出来ない時に出るメッセージ」）: 「読み込み中」のまま待たせない。
+    //   12秒続いたら（応答が無い・回線が細い・切れている）知らせる。届いたら札は消える
+    if (!need) {
+      if (this.waitTimer) { clearTimeout(this.waitTimer); this.waitTimer = null; }
+      hideRetry('page');
+    } else if (!this.waitTimer) {
+      this.waitTimer = setTimeout(() => {
+        this.waitTimer = null;
+        if (this.opened && (!this.pg(this.index) || this.pendingFlip !== 0)) showRetry(() => this.retryPages(), 'page');
+      }, LOAD_WAIT_MS);
+    }
+  }
+  private waitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 「もう一度」: 失敗回数を消し、応答の無いまま止まっている近くのページも取り直す */
+  private retryPages(): void {
+    this.failN.clear();
+    for (let d = -1; d <= 1; d++) { const p = this.deck[this.index + d]; if (p != null && !this.imgs[p]) this.loading.delete(p); }
+    this.pump(); this.syncLoading();
   }
   /** 闇からの夜明け：紙と背景は真っ黒から、ろうそくは0.4秒後に灯り、灯りは3.2秒かけて満ちる */
   private dawn(): void {
@@ -310,7 +330,8 @@ export class Reader {
   hide(): void {
     this.opened = false;
     this.pendingFlip = 0; this.el.load.classList.remove('show');
-    hideRetry();
+    if (this.waitTimer) { clearTimeout(this.waitTimer); this.waitTimer = null; }
+    hideRetry('page');
     this.root.classList.remove('show', 'matchcut', 'dawning');
     if (this.dawnTimer) { clearTimeout(this.dawnTimer); this.dawnTimer = null; }
     if (this.ribbonTimer) { clearTimeout(this.ribbonTimer); this.ribbonTimer = null; }
@@ -396,9 +417,9 @@ export class Reader {
   private retryCheck(i: number, ok: boolean): void {
     const k = this.deck.indexOf(i);
     const near = this.opened && k >= this.index - 1 && k <= this.index + 1;
-    if (ok) { if (k === this.index) hideRetry(); return; }
+    if (ok) { if (k === this.index) hideRetry('page'); return; }
     if (!near || (this.failN.get(i) || 0) < Reader.RETRY_MAX) return;   // 回数が残っている間は従来どおり pump() が取り直す
-    showRetry(() => { this.failN.clear(); this.pump(); this.syncLoading(); });
+    showRetry(() => this.retryPages(), 'page');
   }
   /** 未着のままスワイプされていたページが届いたら、そのままめくる（2026-09-26 QA D14） */
   private firePending(): void {

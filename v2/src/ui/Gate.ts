@@ -23,6 +23,8 @@ const SWEEP_MS = 0;        // 0 = 縁を走る光を出さない
 const RELEASE_MS = 500;    // 「解けた」一拍（枠の内側がふっと明るくなり、わずかに緩む）
 const SPLIT_MS = 1200;     // ゲート全体（枠・文字・入力欄）がゆっくりフェードアウトする時間
 const ERR_MS = 1500;       // 「合言葉が違います」を出しておく時間
+/** 2026-10-20 beta: 間違えても入力を残し、案内は次の入力まで出す（?fx=0 で旧動作） */
+const KEEP_INPUT = QP.get('fx') !== '0';
 
 function norm(s: string): string {
   let v = (s || '');
@@ -112,6 +114,7 @@ export class Gate {
     });
     // 全部消した時に残る <br> などを掃除（:empty の案内文・高さを保つ）。変換中は触らない
     this.input.addEventListener('input', (e: Event) => {
+      if (KEEP_INPUT && this.err.classList.contains('show')) this.err.classList.remove('show');   // 次に打った所で案内を消す
       if ((e as InputEvent).isComposing) return;
       if (this.input.textContent === '' && this.input.childNodes.length) this.input.textContent = '';
     });
@@ -152,13 +155,24 @@ export class Gate {
       const cps = Array.from(this.input.textContent || '').map(c => c.codePointAt(0)!.toString(16)).join(' ');
       this.err.textContent = '合言葉が違います [' + cps + ']';
     }
-    this.input.textContent = '';
+    // 2026-10-20 beta（Codex 指摘 3）: 打った文字は消さずに全選択で残す（一字だけ直せる・打ち直すならそのまま上書き）。
+    //   「合言葉が違います」は次に打つまで出したまま（1.5秒で消すと読む前に消える）。?fx=0 は旧動作（全消去・1.5秒）
     this.wrap.classList.remove('shake');
     void this.wrap.offsetWidth;                  // アニメーションを巻き戻す
     this.wrap.classList.add('shake');
     this.err.classList.add('show');
     if (this.errTimer) clearTimeout(this.errTimer);
-    this.errTimer = setTimeout(() => this.err.classList.remove('show'), ERR_MS);
+    this.errTimer = null;
+    if (!KEEP_INPUT) {
+      this.input.textContent = '';
+      this.errTimer = setTimeout(() => this.err.classList.remove('show'), ERR_MS);
+      return;
+    }
+    try {
+      this.input.focus({ preventScroll: true });
+      const r = document.createRange(); r.selectNodeContents(this.input);
+      const sel = getSelection(); if (sel) { sel.removeAllRanges(); sel.addRange(r); }
+    } catch { /* noop */ }
   }
 
   private succeed(): void {

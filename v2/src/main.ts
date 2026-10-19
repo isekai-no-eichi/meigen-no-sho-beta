@@ -9,19 +9,19 @@ import { Reader } from './reader/Reader';
 import { Ui } from './ui/Ui';
 import { Gate, gateNeeded } from './ui/Gate';
 import {
-  S, ST, saveStats, hasBookmark, favCount, MOBILE, QP, markUnlocked, PERF, asset,
+  S, ST, saveStats, hasBookmark, favCount, MOBILE, QP, markUnlocked, PERF, asset, fxOn, setStoreFailHandler,
 } from './state';
 import {
   initAudioGlobalHooks, ensureAudio, toggleSound, onSoundChange, activity, flipDuck,
   bgmTick, bgmFadeOut, bgmWant, setAmbBoost, setReadingProbe, setFullscreenHook, setTiltGrantHandler,
-  thudHeavy, openBookSound, blip, haptic, audioDebug,
+  thudHeavy, openBookSound, blip, haptic, audioDebug, HAPTIC_LAND,
 } from './audio';
 import { track } from './track';
 import { initCounter } from './counter';
 import { fsEnter, fsOn } from './fullscreen';
 import { initBetaPanel } from './ui/BetaPanel';
 import { setRainPan } from './audio';
-import { showRetry } from './ui/Retry';
+import { showRetry, hideRetry, retryShown, noteStoreFail } from './ui/Retry';
 
 type Stage = 'book' | 'opening' | 'read' | 'closing';
 
@@ -165,6 +165,7 @@ let openT0 = 0, lifting = false;
 // ---- cover（2026-10-19 beta・?cover=0 で旧台本）：表紙が本当に開いてから潜る ----
 //   T_SOUND(1.275) 表紙が開きはじめる（CoverOpen 2.0s・ゆっくり重く）
 //   → 開き切り（3.275）で革の着地音・触覚 → 続けて1枚目（FirstPage 1.6s）→ 1枚目が着地（4.875）で潜る
+//   2026-10-20 KEI「一枚目捲れるやつは要らなかった」→ 既定は1枚目なし（scene.pageSec=0）＝表紙の着地（3.275）で潜る。?cpage=1 で上の旧
 //   潜ってから暗転・マッチカットまでの間合い（+1.005／+1.455）は旧台本と同じ。
 //   カメラの寄りは潜りはじめまで引き延ばす。旧の 5°持ち上げはしない。
 const coverOn = (): boolean => FX_COVER && scene.coverSec > 0;
@@ -226,7 +227,7 @@ function startOpening(mode: string, title?: string): void {
   at(tSfx, () => openBookSound());
   at(T_MOTES, () => scene.motesStart());
   at(tDive, () => { diving = true; });
-  at(tThud, () => haptic(16));                               // 革が着地する直前
+  at(tThud, () => haptic(fxOn('haptic') ? HAPTIC_LAND : 16));   // 革が着地する直前（beta: Android 向けに短い2打 [10,40,16]）
   // 2026-09-07 夜 KEI: 光で切り替えず、ページの間へ潜ったら真っ暗になる。そこからろうそくが灯り、紙が浮かんでくる
   at(tFade, () => { fade.style.transition = 'opacity .4s ease-in'; fade.style.opacity = '1'; });
   // 2026-09-07 KEI: 読書の背景は3Dスクショでなく書斎の絵(hall-bg.jpg)に戻す。スクショは撮らない
@@ -392,14 +393,35 @@ if (GATE) {
   gate.show();
 }
 
-// 2026-10-19 beta: 本の読み込みに失敗したら「読み込めなかった　もう一度」（ui/Retry.ts・?fx=0 では出ない）
+// 2026-10-19 beta: 本の読み込みに失敗したら知らせて「もう一度」（ui/Retry.ts・?fx=0 では出ない）
+// 2026-10-20 KEI「読み込み出来ない時に出るメッセージを出すこと」:
+//   ・取れなかった（オフライン含む）→ 即「書斎に届かなかった。」（切れていれば「つながりが切れている。戻れば続きを開く。」・戻れば自動で取り直す）
+//   ・12秒たっても届かない → 同じ札。押すと、まだ取りに行っている最中なら開き直す（二重に本を置かないため）。後から届けば札は自然に消える
+const LOAD_WAIT_MS = 12000;
+let bookState: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
 function loadBook(): void {
+  bookState = 'loading';
+  const gen = ++bookGen;
+  const wd = setTimeout(() => {
+    if (gen === bookGen && bookState === 'loading') showRetry(() => { if (bookState === 'loading') location.reload(); else loadBook(); }, 'book');
+  }, LOAD_WAIT_MS);
   scene.load(() => {
+    clearTimeout(wd); bookState = 'ready';
+    hideRetry('book');
     scene.resize();
     if (GATE) { scene.hideBook(); return; }  // 読み込み完了時にも本を消し直す（load が scale 1 にするため）
     ui.start();
-  }, () => showRetry(loadBook));
+  }, () => { clearTimeout(wd); bookState = 'failed'; showRetry(loadBook, 'book'); });
 }
+let bookGen = 0;
+// 書斎の一部（革と紙の質感・暖炉の光 HDRI・1枚目の絵）は取れなくても本は読める。BookScene は黙って旧の見た目に落ちるので、
+// ここで拾って本の画面にいる時だけ小さく知らせる（「もう一度」＝開き直す・BookScene の作り直しはしない）。本と名言のページは別経路
+THREE.DefaultLoadingManager.onError = (url: string) => {
+  if (/\.glb(\?|$)/.test(url)) return;
+  console.warn('[load] 書斎の一部が届かなかった', url);
+  if (stage === 'book' && !retryShown()) showRetry(() => location.reload(), 'part');
+};
+setStoreFailHandler(noteStoreFail);   // 印・栞が保存できなかった時の一行（Codex 指摘 4）
 loadBook();
 initBetaPanel();                           // 右上「試作版」→ 試作の切替パネル
 

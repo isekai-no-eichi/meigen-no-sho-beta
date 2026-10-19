@@ -396,8 +396,8 @@ export class BookScene {
         this.coverSec = this.coverAct ? this.coverAct.getClip().duration : 0;
         this.pageSec = this.pageAct ? this.pageAct.getClip().duration : 0;
         this.coverMax = THREE.MathUtils.degToRad(150); this.pageMax = THREE.MathUtils.degToRad(148);
-        // ?cpage=0: 1枚目はめくらない（表紙だけ）
-        if (QP.get('cpage') === '0') { this.pageAct = null; this.pageSec = 0; }
+        // 2026-10-20 KEI「一枚目捲れるやつは要らなかった」: 既定は1枚目をめくらない（表紙の着地で潜る）。?cpage=1 で比較用に旧（めくる）
+        if (QP.get('cpage') !== '1') { this.pageAct = null; this.pageSec = 0; this.pageMax = 0; }
       } else if (cover) {
         const bb = new THREE.Box3().setFromObject(cover);
         const hinge = new THREE.Group();

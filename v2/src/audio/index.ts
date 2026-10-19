@@ -576,12 +576,36 @@ function hapticIOS(p: number | number[]): void {
     wh.trigger(v).catch(() => {});
   } catch { /* noop */ }
 }
+/** 2026-10-20 beta: Android の振動モーターは粗いので、短く柔らかく揃える（haptic 入の時だけ・切なら本番どおり生の値）。
+ *  単発は 8〜16ms に収める（5ms は機種によって鳴らない）。パターンは 鳴＝8〜16ms・休＝30ms 以上（続けて鳴ると1つの重い振動に潰れる） */
+function softAndroid(p: number | number[]): number | number[] {
+  const c = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
+  if (!Array.isArray(p)) return c(p, 8, 16);
+  return p.map((v, i) => (i % 2 ? Math.max(30, Math.round(v)) : c(v, 8, 16)));
+}
+/** 表紙の着地（Android は 台本の setTimeout から・iPhone は操作の外なので鳴らない）。BetaPanel「振動を試す」も同じ形 */
+export const HAPTIC_LAND: number[] = [10, 40, 16];
+function hasVibrate(): boolean { try { return typeof navigator.vibrate === 'function'; } catch { return false; } }
 export function haptic(p: number | number[], ios = false): void {
-  try { if (navigator.vibrate) { navigator.vibrate(p); return; } } catch { /* noop */ }
+  try { if (hasVibrate()) { navigator.vibrate(HAPTIC_FX ? softAndroid(p) : p); return; } } catch { /* noop */ }
   if (ios) hapticIOS(p);
 }
-/** 2回タップ用: Android は開く台本の haptic(8) が鳴るので、ここでは iPhone だけ（ユーザー操作の中で呼ぶ） */
-export function hapticTapIOS(p: number): void { try { if (typeof navigator.vibrate === 'function') return; } catch { /* noop */ } hapticIOS(p); }
+/** 2回タップ用（Ui.tap・ユーザー操作の中で呼ぶ）。
+ *  2026-10-20: Android も同じ瞬間に鳴らす（前は開く台本の haptic(8) まで約2.8秒遅れていた）。haptic 切なら iPhone だけの旧動作 */
+export function hapticTap(p: number): void {
+  if (hasVibrate()) { if (HAPTIC_FX) haptic(p); return; }
+  hapticIOS(p);
+}
+/** 試作版パネル「振動を試す」: 表紙の着地と同じ形をスイッチに関係なく鳴らす。どの方式で鳴らしたかを返す（パネルに文字で出す） */
+export function hapticTest(): 'android' | 'ios' | 'none' {
+  if (hasVibrate()) { try { return navigator.vibrate(softAndroid(HAPTIC_LAND)) ? 'android' : 'none'; } catch { return 'none'; } }
+  try {
+    if (!wh) wh = new WebHaptics();
+    const v = [{ duration: 10, intensity: 0.8 }, { duration: 16, intensity: 0.8, delay: 40 }];
+    wh.trigger(v).catch(() => {});
+    return 'ios';
+  } catch { return 'none'; }
+}
 
 export function initAudioGlobalHooks(): void {
   applySoundFlags();
@@ -593,7 +617,7 @@ export function initAudioGlobalHooks(): void {
     if (b && !b.disabled) {
       tapSound();
       // beta（haptic）: 押下音と一緒に軽く。印・栞はそれぞれの処理が鳴らすので重ねない
-      if (HAPTIC_FX && b.id !== 'favBtn' && b.id !== 'favListBtn') haptic(5, true);
+      if (HAPTIC_FX && b.id !== 'favBtn' && b.id !== 'favListBtn' && !b.classList.contains('bhap')) haptic(5, true);
     }
   }, true);
   (['pointerdown', 'touchend', 'click', 'keydown'] as const).forEach(ev => addEventListener(ev, ensureAudio, { passive: true }));

@@ -10,7 +10,7 @@
 //   - 「この本の説明」= 羊皮紙の手紙（2026-09-17 KEI・黒革をやめた）。縦スクロール＋3ページ送り
 // ============================================================
 import { hasBookmark, favCount, clearBookmark, a2hsSeen, a2hsMark, asset } from '../state';
-import { hapticTapIOS } from '../audio';
+import { hapticTap } from '../audio';
 
 // ---- 枠・札の画像の先読み（2026-09-30 KEI「文字が出た後に、画像のフレームが表示されるのが気になる」） ----
 //   CSS の border-image / background は、その要素が初めて描かれる時に読み込みが始まる。
@@ -212,7 +212,7 @@ export class Ui {
     const now = performance.now();
     if (now - this.lastTap < DOUBLE_TAP) {
       this.lastTap = 0;
-      hapticTapIOS(8);                          // beta（haptic）: iPhone は操作の中でしか鳴らせないのでここで
+      hapticTap(8);                             // beta（haptic）: 2回タップの瞬間（iPhone は操作の中でしか鳴らせない・Android も同時に）
       this.fadeHint();
       this.hooks.onOpen('read');
       return;

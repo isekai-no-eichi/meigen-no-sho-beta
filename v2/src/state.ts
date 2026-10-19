@@ -39,9 +39,13 @@ function readJSON<T>(key: string, fallback: T): T {
     return (v == null ? fallback : v) as T;
   } catch { return fallback; }
 }
-function writeJSON(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* プライベートブラウズ等 */ }
+function writeJSON(key: string, value: unknown): boolean {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; /* プライベートブラウズ等 */ }
 }
+// 2026-10-20 beta（Codex 指摘 4）: 印・栞が保存できなかった時だけ知らせる（main.ts が ui/Retry.ts の noteStoreFail を渡す）
+let storeFail: (() => void) | null = null;
+export function setStoreFailHandler(f: () => void): void { storeFail = f; }
+function writeKeep(key: string, value: unknown): void { if (!writeJSON(key, value) && storeFail) { try { storeFail(); } catch { /* noop */ } } }
 
 // ---- 設定 ----
 export const S: Settings = { ...DEFAULTS, ...readJSON<Partial<Settings>>(K.settings, {}) };
@@ -61,7 +65,7 @@ export function loadFavs(): number[] {
   const v = readJSON<number[]>(K.favs, []);
   return Array.isArray(v) ? v : [];
 }
-export function saveFavs(favs: number[]): void { writeJSON(K.favs, favs); }
+export function saveFavs(favs: number[]): void { writeKeep(K.favs, favs); }
 export function favCount(): number { return loadFavs().length; }
 
 // ---- 栞（2026-09-09 KEI: 何本でも挟める） ----
@@ -87,7 +91,7 @@ export function loadBookmarks(): Bookmark[] {
 }
 export function saveBookmarks(list: Bookmark[]): void {
   if (!list.length) { clearBookmark(); return; }
-  writeJSON(K.bookmark, { list });
+  writeKeep(K.bookmark, { list });
 }
 /** 一番あとに挟んだ栞。「栞から読む」で開く時はこれを使う */
 export function loadBookmark(): Bookmark | null {

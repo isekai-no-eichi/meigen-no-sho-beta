@@ -4,7 +4,7 @@
 // iframe は廃止し、読書は同一ページの全画面レイヤー（reader/Reader.ts）。
 // ============================================================
 import * as THREE from 'three';
-import { BookScene, FLARE_GAIN, REVEAL_SEC } from './scene/BookScene';
+import { BookScene, FLARE_GAIN, REVEAL_SEC, FX_COVER } from './scene/BookScene';
 import { Reader } from './reader/Reader';
 import { Ui } from './ui/Ui';
 import { Gate, gateNeeded } from './ui/Gate';
@@ -162,6 +162,13 @@ const OPEN_DUR = 0.95;               // 表紙が開ききるまで（パタッ�
 const T_SOUND = 0.85 * OK, T_MOTES = 1.00 * OK, T_DIVE = 1.45 * OK, T_CUT = 2.42 * OK;
 const T_SFX = T_SOUND + OPEN_DUR - 1.30;   // 革の着地音(呼び出し+1.30s)が表紙の着地と合う時刻
 let openT0 = 0, lifting = false;
+// ---- cover（2026-10-19 beta・?cover=0 で旧台本）：表紙が本当に開いてから潜る ----
+//   T_SOUND(1.275) 表紙が開きはじめる（CoverOpen 2.0s・ゆっくり重く）
+//   → 開き切り（3.275）で革の着地音・触覚 → 続けて1枚目（FirstPage 1.6s）→ 1枚目が着地（4.875）で潜る
+//   潜ってから暗転・マッチカットまでの間合い（+1.005／+1.455）は旧台本と同じ。
+//   カメラの寄りは潜りはじめまで引き延ばす。旧の 5°持ち上げはしない。
+const coverOn = (): boolean => FX_COVER && scene.coverSec > 0;
+let tDive = T_DIVE;
 
 // 2026-09-17 KEI の起動演出:
 //   「2回タップで、本を読む」→ タップで文字がフェードで消える（0.6秒）
@@ -205,15 +212,24 @@ function startOpening(mode: string, title?: string): void {
   setAmbBoost(0.34);                                        // 環境音がすっと引く
   const at = (sec: number, fn: () => void) => setTimeout(fn, sec * 1000);
 
-  at(T_SOUND, () => { opening = true; haptic(8); });
-  at(T_SFX, () => openBookSound());
+  const cov = coverOn();
+  // cover: 表紙の開き終わり（cEnd）・1枚目の着地（pEnd）に合わせて、潜り以降を後ろへずらす
+  const cEnd = T_SOUND + scene.coverSec, pEnd = cEnd + scene.pageSec;
+  tDive = cov ? pEnd : T_DIVE;
+  const tSfx = cov ? cEnd - 1.30 : T_SFX;                      // 革の着地音（呼び出し+1.30s）＝表紙の着地
+  const tThud = cov ? cEnd - 0.05 : 2.10 * OK;
+  const tFade = cov ? tDive + (2.12 - 1.45) * OK : 2.12 * OK;
+  const tCut = cov ? tDive + (T_CUT - T_DIVE) : T_CUT;
+  at(T_SOUND, () => { opening = true; haptic(8); if (cov) scene.coverPlay(); });
+  if (cov && scene.pageSec > 0) at(cEnd, () => scene.pagePlay());
+  at(tSfx, () => openBookSound());
   at(T_MOTES, () => scene.motesStart());
-  at(T_DIVE, () => { diving = true; });
-  at(2.10 * OK, () => haptic(16));                               // 革が着地する直前
+  at(tDive, () => { diving = true; });
+  at(tThud, () => haptic(16));                               // 革が着地する直前
   // 2026-09-07 夜 KEI: 光で切り替えず、ページの間へ潜ったら真っ暗になる。そこからろうそくが灯り、紙が浮かんでくる
-  at(2.12 * OK, () => { fade.style.transition = 'opacity .4s ease-in'; fade.style.opacity = '1'; });
+  at(tFade, () => { fade.style.transition = 'opacity .4s ease-in'; fade.style.opacity = '1'; });
   // 2026-09-07 KEI: 読書の背景は3Dスクショでなく書斎の絵(hall-bg.jpg)に戻す。スクショは撮らない
-  at(T_CUT, () => {
+  at(tCut, () => {
     setStage('read');
     $('bgDim').style.opacity = '1';
     reader.open(mode, { matchCut: true, dawn: true });
@@ -222,7 +238,8 @@ function startOpening(mode: string, title?: string): void {
       scene.motesStop(); scene.resetOpenFX();
       setAmbBoost(1);                                         // 引いた環境音を読書の部屋の音として戻す
       opening = false; diving = false; lifting = false; openT = 0; diveT = 0;
-      if (scene.hinge) scene.hinge.rotation.z = 0;
+      if (cov) scene.coverSet(0, 0);
+      else if (scene.hinge) scene.hinge.rotation.z = 0;
     }, 600);
     // A: 読書画面（matchcut .45s）と暗転の解け（350ms+.6s）が終わってから隠す
     setTimeout(() => { if (stage === 'read') hideUnder(true); }, 1000);
@@ -244,13 +261,15 @@ function openEnvelope(): { r: number; ph: number } | null {
   if (ot > 2.20 * OK) f = Math.max(0.35, 1 - (ot - 2.20 * OK) / (0.55 * OK));
   scene.openFlare = f * OPEN_FLARE;   // 2026-09-08 KEI: 開く時の光は眩しすぎる→無し（光の粒だけ残す）
   // 表紙が5°持ち上がる（0.15 → 0.80）。開きはじめたら hinge は下のループに任せる
-  if (!opening && scene.hinge) {
+  if (!opening && scene.hinge && !coverOn()) {
     const k = Math.max(0, Math.min(1, (ot - 0.15 * OK) / (0.65 * OK)));
     scene.hinge.rotation.z = OPEN_LIFT * (k * k * (3 - 2 * k));
   }
   // カメラが寄る（1.55 → 1.30）。潜り込みが始まったら dive 側が持つ
-  if (ot < T_DIVE) {
-    const k = Math.max(0, Math.min(1, (ot - 0.15 * OK) / (1.20 * OK)));
+  if (ot < tDive) {
+    // cover: 表紙と1枚目が開く間、ゆっくり寄り続けて潜りはじめで寄り切る
+    const dur = coverOn() ? tDive - 0.15 * OK - 0.15 : 1.20 * OK;
+    const k = Math.max(0, Math.min(1, (ot - 0.15 * OK) / dur));
     return { r: BookScene.CAM_R - 0.26 * (k * k * (3 - 2 * k)), ph: scene.camPhi };
   }
   return null;
@@ -272,14 +291,16 @@ function closeBook(): void {
     reader.hide();
     $('bgDim').style.opacity = '0';
     scene.bookTarget = 1;
-    if (scene.hinge) scene.hinge.rotation.z = 2.5;
+    if (coverOn()) scene.coverSet(scene.coverMax, scene.pageMax);   // cover: クリップを止め、開き切りの角度から手で閉じる
+    else if (scene.hinge) scene.hinge.rotation.z = 2.5;
     closing = { phase: 'pull', t: 0 };
     fade.style.transition = 'opacity .7s ease-out'; fade.style.opacity = '0';
   }, 1450);
 }
 function closeBookDone(): void {
   closing = null;
-  if (scene.hinge) scene.hinge.rotation.z = 0;
+  if (coverOn()) scene.coverSet(0, 0);
+  else if (scene.hinge) scene.hinge.rotation.z = 0;
   setStage('book');
   thudHeavy(); haptic(18); scene.shake = 1;
   scene.burstDust();
@@ -394,7 +415,8 @@ scene.renderer.setAnimationLoop((now: number) => {
   bgmTick(wdt);
   if (stage === 'read' && !diving) return;       // 読書中は3Dを描かない（電池）
 
-  if (opening && scene.hinge) {
+  scene.tickMixer(wdt);                          // cover: 表紙と1枚目のクリップ
+  if (opening && scene.hinge && !coverOn()) {
     openT = Math.min(openT + wdt / OPEN_DUR, 1);
     const k = openT * openT * (3 - 2 * openT);
     scene.hinge.rotation.z = OPEN_LIFT + (2.5 - OPEN_LIFT) * k;
@@ -409,11 +431,13 @@ scene.renderer.setAnimationLoop((now: number) => {
       const k = Math.min(closing.t / 1.0, 1), e2 = 1 - Math.pow(1 - k, 3);
       // near: 抜け始めは本の縮尺（BOOK_SIZE）に合わせて寄せ、抜け切ったら通常の距離へ（2026-09-30 本90%）
       closeCam = { r: 0.19 + (BookScene.CAM_R - 0.19) * e2, ph: 0.12 + (scene.camPhi - 0.12) * e2, near: 1 - e2 };
-      scene.hinge.rotation.z = 2.5;
+      scene.hinge.rotation.z = coverOn() ? scene.coverMax : 2.5;
       if (k >= 1) closing = { phase: 'shut', t: 0 };
     } else if (closing.phase === 'shut') {
       const k = Math.min(closing.t / 0.85, 1), e2 = k * k * k;
-      scene.hinge.rotation.z = 2.5 * (1 - e2);
+      // cover: 1枚目も同じ割合で戻す（角度は常に 表紙 ≥ 1枚目 なので突き抜けない）
+      scene.hinge.rotation.z = (coverOn() ? scene.coverMax : 2.5) * (1 - e2);
+      if (coverOn() && scene.pageHinge) scene.pageHinge.rotation.z = scene.pageMax * (1 - e2);
       if (k >= 1) closeBookDone();
     }
   }

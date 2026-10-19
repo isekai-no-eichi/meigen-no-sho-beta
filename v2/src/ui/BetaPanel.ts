@@ -6,6 +6,7 @@
 import { fxOn, fxSet, type FxKey } from '../state';
 
 const ROWS: [FxKey, string][] = [
+  ['cover', '表紙が開いてから潜る'],
   ['env', '暖炉の反射'],
   ['pbr', '革と紙の質感'],
   ['smoke', 'ろうそくの煙'],

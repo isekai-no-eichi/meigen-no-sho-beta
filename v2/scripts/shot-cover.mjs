@@ -51,8 +51,9 @@ async function shot(name, idx, deg, qx = '') {
   await ctx.close();
 }
 const only = arg('only');
-if (!only || only === 'half') await shot('cover_1_half', 0, 75);
-if (!only || only === 'open') await shot('cover_2_open', 0, 149.9, '&cpage=0')   // 1枚目が動き出す前の「開き切り」（ソフト描画は1コマが遅いので1枚目を止めて撮る）;
-if (!only || only === 'page') await shot('cover_3_page', 1, 100);
+const PRE = arg('prefix') || 'cover';   // 2026-10-19 K: --prefix=cover2 で cover2_*.png
+if (!only || only === 'half') await shot(PRE + '_1_half', 0, 75);
+if (!only || only === 'open') await shot(PRE + '_2_open', 0, 149.9, '&cpage=0')   // 1枚目が動き出す前の「開き切り」（ソフト描画は1コマが遅いので1枚目を止めて撮る）;
+if (!only || only === 'page') await shot(PRE + '_3_page', 1, 100);
 console.log(errors.length ? errors.join('\n') : 'no console errors');
 await browser.close();

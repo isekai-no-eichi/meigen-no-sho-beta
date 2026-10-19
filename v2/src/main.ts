@@ -9,7 +9,7 @@ import { Reader } from './reader/Reader';
 import { Ui } from './ui/Ui';
 import { Gate, gateNeeded } from './ui/Gate';
 import {
-  S, ST, saveStats, hasBookmark, favCount, MOBILE, QP, markUnlocked, PERF,
+  S, ST, saveStats, hasBookmark, favCount, MOBILE, QP, markUnlocked, PERF, asset,
 } from './state';
 import {
   initAudioGlobalHooks, ensureAudio, toggleSound, onSoundChange, activity, flipDuck,
@@ -213,6 +213,7 @@ function startOpening(mode: string, title?: string): void {
   const at = (sec: number, fn: () => void) => setTimeout(fn, sec * 1000);
 
   const cov = coverOn();
+  if (cov) { const fp = reader.peekFirst(mode); scene.setFirstPage(asset('pages/p' + ((fp ?? 0) + 1) + '.jpg')); }
   // cover: 表紙の開き終わり（cEnd）・1枚目の着地（pEnd）に合わせて、潜り以降を後ろへずらす
   const cEnd = T_SOUND + scene.coverSec, pEnd = cEnd + scene.pageSec;
   tDive = cov ? pEnd : T_DIVE;

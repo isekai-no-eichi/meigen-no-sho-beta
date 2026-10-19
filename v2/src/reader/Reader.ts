@@ -242,6 +242,19 @@ export class Reader {
     this.pump();
     this.syncLoading();
   }
+  /** cover（2026-10-19 K）: open(mode) で最初に見せるページ番号（0 始まり）。表紙を開いた時の1枚目に同じ絵を貼るため。
+   *  栞があればそのページ、無ければ混ぜた並び（primed に残して open() と同じ並びにする）。お気に入りは null（p1） */
+  peekFirst(mode: string): number | null {
+    if (mode !== 'resume' && mode !== 'read' && mode !== 'fresh') return null;
+    const b = mode === 'fresh' ? null : loadBookmark();
+    let deck: number[], i = 0;
+    if (b && b.deck.every(n => n >= 0 && n < N)) { deck = b.deck; i = Math.min(b.index, deck.length - 1); }
+    else { deck = this.primed = this.primed ?? this.shuffled(this.ALL_PAGES); }
+    const at = QP.get('at');
+    if (at) { const n = at.toUpperCase() === 'END' ? deck.length - 1 : parseInt(at, 10) - 1; if (n >= 0) i = Math.min(n, deck.length - 1); }
+    const p = deck[i];
+    return typeof p === 'number' ? p : null;
+  }
   /** 合言葉の出現演出（約10秒）の間に、最初の3枚を先読みしておく（2026-09-26 QA D14・KEI）。
    *  既存の ensure() に乗せるだけ。開いた時は open() がこの並びを引き継ぐ。 */
   prime(n = 3): void {

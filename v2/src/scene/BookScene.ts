@@ -73,6 +73,15 @@ export const FX_COVER = fxOn('cover');
 const PARCH_COLOR = 0xcdbf9c;
 /** cover（K）: 古書の紙の色の掛け算。ろうそく・暖炉の光とグレードで橙に寄るので、緑青を持ち上げて打ち消す（?ptint=） */
 const PARCH_TINT = [0.75, 0.95, 1.25];
+/** cover（2026-10-20 本の質感）: 表紙が開く間（開く角度に比例）、カメラを横へ平行移動して「開いた本の外形の中心」を画面の中心へ寄せる。
+ *  開いた表紙は本の左へ大きく張り出すので、自転の角度によっては縦画面の端で切れていた（J の宿題）。回り込み（camTheta）は変えない。
+ *  幅が縦画面に収まらない時だけ少し後ろへ引く。潜りの間に 0 へ戻す（潜る先は従来どおり）。?cframe=0 で寄せない・?cframe=0.5 で半分 */
+const COVER_FRAME = qn('cframe', 1.0);
+const _frameBB = new THREE.Box3();
+const _frameC = new THREE.Vector3();
+const _frameR = new THREE.Vector3();
+/** cover（2026-10-20）: 1枚目をめくる時の反り（glb のシェイプキー Curl）の強さ。?curl=0 で板に戻る */
+const PAGE_CURL = qn('curl', 0.9);
 /** 煙の立つ位置＝背景の絵（app-bg.jpg 941x1672）の机のろうそくの炎。絵の中心を 0 とした比率 */
 const SMOKE_AT = { x: 268 / 470 - 0.5, y: 0.5 - 308 / 835 };
 
@@ -203,6 +212,9 @@ export class BookScene {
   private mixer: THREE.AnimationMixer | null = null;
   private coverAct: THREE.AnimationAction | null = null;
   private pageAct: THREE.AnimationAction | null = null;
+  /** cover（2026-10-20）: シェイプキーを持つメッシュ。1枚目（Curl＝めくる時の反り）・背（Open＝表紙が開くと綴じ目の頂が沈む） */
+  private firstMesh: THREE.Mesh | null = null;
+  private spineMesh: THREE.Mesh | null = null;
   /** cover: 開き切った角度（rad）。閉じる時に手で戻す起点 */
   coverMax = 2.5; pageMax = 0;
   /** cover: クリップの長さ（秒）。main.ts の台本が使う */
@@ -393,6 +405,12 @@ export class BookScene {
         // cover: Blender 側の蝶番 Empty をそのまま使う（hinge.attach(cover) で付け替えると見返しだけが開くので、しない）
         this.hinge = rig;
         this.pageHinge = book.getObjectByName('PageHinge') || null;
+        book.traverse(o => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh || !m.morphTargetDictionary) return;
+          if ('Curl' in m.morphTargetDictionary) this.firstMesh = m;
+          if ('Open' in m.morphTargetDictionary) this.spineMesh = m;
+        });
         const mixer = new THREE.AnimationMixer(book); this.mixer = mixer;
         const mk = (name: string): THREE.AnimationAction | null => {
           const clip = THREE.AnimationClip.findByName(g.animations, name);
@@ -488,7 +506,14 @@ export class BookScene {
       const first = m.name === 'Page_First';
       planarUV(m.geometry, first && QP.get('pflip') !== '0');   // 1枚目の絵は上下を返すと、天が本の上端・鏡なし（撮影で確認）
       const c = mat.clone(); this.parchMats.push(c);
-      if (m.name === 'Cover_Endpaper') c.color.multiplyScalar(qn('pek', 0.7));   // etch がマテリアルごとに uniform を持つので、面ごとに分ける（テクスチャは共有）
+      if (m.name === 'Cover_Endpaper') {
+        c.color.multiplyScalar(qn('pek', 0.7));
+        // 2026-10-20: 見返しの縁だけ紙の繊維を強く（Paper005 CC0 から作った endpaper-normal・四隅 0..1 で1回）
+        if (FX_PBR) {
+          const en = new THREE.TextureLoader().load(asset('pbr/endpaper-normal.webp')); en.flipY = false; en.colorSpace = THREE.NoColorSpace;
+          c.normalMap = en; c.normalScale = new THREE.Vector2(1.0, 1.0);
+        }
+      }   // etch がマテリアルごとに uniform を持つので、面ごとに分ける（テクスチャは共有）
       if (first && up) {
         // 表紙側を向く三角形だけを group 0（名言の絵）に、残りを group 1（素の紙）に並べ替える
         const nm = new THREE.Matrix3().getNormalMatrix(new THREE.Matrix4().copy(inv).multiply(m.matrixWorld));
@@ -523,7 +548,19 @@ export class BookScene {
     if (this.pageHinge) this.pageHinge.rotation.z = page;
   }
   /** cover: 毎フレーム。ミキサーがある時だけ */
-  tickMixer(dt: number): void { if (this.mixer) this.mixer.update(dt); }
+  tickMixer(dt: number): void { if (this.mixer) { this.mixer.update(dt); this.tickMorph(); } }
+  /** cover（2026-10-20）: 背の Open は表紙の角度に、1枚目の Curl はめくりの途中だけ（0°と着地で 0・真ん中で最大） */
+  private tickMorph(): void {
+    const sm = this.spineMesh, fm = this.firstMesh;
+    if (sm && this.hinge && sm.morphTargetInfluences && sm.morphTargetDictionary) {
+      const k = THREE.MathUtils.clamp(this.hinge.rotation.z / Math.max(1e-3, this.coverMax), 0, 1);
+      sm.morphTargetInfluences[sm.morphTargetDictionary.Open] = k * k * (3 - 2 * k);
+    }
+    if (fm && this.pageHinge && fm.morphTargetInfluences && fm.morphTargetDictionary) {
+      const a = THREE.MathUtils.clamp(this.pageHinge.rotation.z / Math.max(1e-3, this.pageMax), 0, 1);
+      fm.morphTargetInfluences[fm.morphTargetDictionary.Curl] = Math.sin(Math.PI * a) * PAGE_CURL;
+    }
+  }
 
   private applyLeather(root: THREE.Object3D): void {
     const tl = new THREE.TextureLoader();
@@ -537,7 +574,8 @@ export class BookScene {
       if (/Cover_Front|Cover_Back/.test(m.name)) {
         const mat = m.material as THREE.MeshStandardMaterial;
         mat.normalMap = nrm; mat.normalScale = FX_PBR ? new THREE.Vector2(0.8, 0.8) : new THREE.Vector2(0.55, 0.55);
-        mat.roughnessMap = rgh; mat.roughness = 1.0; mat.envMapIntensity = 0.35 * ENV_K; mat.needsUpdate = true;
+        // cover（2026-10-20）: book_open.glb は手の触れる所（小口側の角・小口の縁・蝶番）だけ滑らかにした粗さを持つ → それを使う
+        mat.roughnessMap = FX_COVER && mat.roughnessMap ? mat.roughnessMap : rgh; mat.roughness = 1.0; mat.envMapIntensity = 0.35 * ENV_K; mat.needsUpdate = true;
       }
     });
   }
@@ -577,12 +615,17 @@ export class BookScene {
     edge.wrapS = edge.wrapT = THREE.RepeatWrapping;
     const paper = tl.load(asset('pbr/paper-normal.webp')); paper.flipY = false; paper.colorSpace = THREE.NoColorSpace;
     paper.wrapS = paper.wrapT = THREE.RepeatWrapping; paper.repeat.set(2, 2);
+    let edgeAged: THREE.Texture | null = null;
+    if (FX_COVER && root.getObjectByName('CoverHinge')) {
+      edgeAged = tl.load(asset('pbr/edge-normal-aged.webp')); edgeAged.flipY = false; edgeAged.colorSpace = THREE.NoColorSpace;
+    }
     root.traverse(o => {
       const m = o as THREE.Mesh;
       if (!m.isMesh || !m.material) return;
       const mat = m.material as THREE.MeshStandardMaterial;
       if (mat.name === 'M_Pages') {
-        mat.normalMap = edge; mat.normalScale = new THREE.Vector2(0.9, 0.9);
+        // cover（2026-10-20）: book_open.glb の小口は UV を面ごとに 0..1 で張り直した → 同じ紙の並びから作った法線（edge-normal-aged）
+        mat.normalMap = edgeAged || edge; mat.normalScale = new THREE.Vector2(0.9, 0.9);
         mat.roughness = 1.0; mat.needsUpdate = true;
       } else if (mat.name === 'M_PageTop') {
         mat.normalMap = paper; mat.normalScale = new THREE.Vector2(0.35, 0.35);
@@ -1165,10 +1208,12 @@ export class BookScene {
       // 本の中へ潜るほど視野が広がる（覗き込む歪み）
       const fov = 38 + 20 * (k * k);
       if (Math.abs(cam.fov - fov) > 0.05) { cam.fov = fov; cam.updateProjectionMatrix(); }
+      this.frameOpenBook(1 - e2);
     } else if (opts.camOverride) {
       const { r, ph } = opts.camOverride, th = this.camTheta;
       cam.position.set(r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph), r * Math.sin(ph) * Math.cos(th));
       this.nearLook(opts.camOverride.near || 0, 0.01);
+      this.frameOpenBook(1);
     } else {
       const hx = QUALITY ? Math.sin(t * 0.37) * 0.004 + Math.sin(t * 0.91 + 1.0) * 0.002 : 0;
       const hy = QUALITY ? Math.sin(t * 0.53 + 1.0) * 0.003 : 0;
@@ -1208,6 +1253,54 @@ export class BookScene {
    * カメラを本の中心（pivot）へ BOOK_SIZE の比率で寄せてから注視する。near=0 で従来どおり、near=1 で完全に比率どおり。
    * 本を縮めても、潜りの終わり（読書画面へのマッチカット）の見え方が変わらないようにするため。
    */
+  /** cover（2026-10-20）: 開いた本の外形（Box3）の中心が画面の横中央に来るよう、カメラを右ベクトル方向へ平行移動（向きは変えない） */
+  private frameOpenBook(fade: number): void {
+    if (!FX_COVER || !this.mixer || !this.hinge || !this.book || COVER_FRAME <= 0) return;
+    const k = THREE.MathUtils.clamp(this.hinge.rotation.z / Math.max(1e-3, this.coverMax), 0, 1);
+    const w = k * k * (3 - 2 * k) * fade * COVER_FRAME;
+    if (w < 1e-3) return;
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    // 本体のメッシュ（表紙・紙の束・背・裏表紙）の局所の外形箱の8隅を画面へ投影し、左右の端の中点を画面の中央へ。
+    // book 直下には栞・机の影なども付くので含めない。世界の軸の箱だと回った時に空の隅まで数えて引きすぎた
+    const meshes: THREE.Mesh[] = [];
+    for (const nm of ['CoverHinge', 'Pages', 'Spine', 'Cover_Back']) {
+      this.book.getObjectByName(nm)?.traverse(c => { if ((c as THREE.Mesh).isMesh) meshes.push(c as THREE.Mesh); });
+    }
+    if (!meshes.length) return;
+    const ext = (): [number, number] => {
+      let lo = Infinity, hi = -Infinity;
+      _frameBB.makeEmpty();
+      for (const m of meshes) {
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        const b = m.geometry.boundingBox!;
+        for (let i = 0; i < 8; i++) {
+          _frameR.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(m.matrixWorld);
+          _frameBB.expandByPoint(_frameR);
+          _frameR.project(cam);
+          lo = Math.min(lo, _frameR.x); hi = Math.max(hi, _frameR.x);
+        }
+      }
+      return [lo, hi];
+    };
+    let [lo, hi] = ext();
+    _frameBB.getCenter(_frameC);
+    const dist = _frameC.distanceTo(cam.position);
+    // 幅が画面（左右 4% の余白）に収まらない時だけ、その分だけ後ろへ引く（正面寄りの角度で開いた本は縦画面より広い）
+    const span = (hi - lo) / 2 / 0.96;
+    if (span > 1) {
+      _frameR.setFromMatrixColumn(cam.matrixWorld, 2);
+      cam.position.addScaledVector(_frameR, dist * (span - 1) * w);
+      cam.updateMatrixWorld();
+      [lo, hi] = ext();
+    }
+    // 左右の端の中点を画面の中央へ（引いた後の見え方で測り直す）
+    const d2 = _frameC.distanceTo(cam.position);
+    const half = d2 * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * cam.aspect;
+    _frameR.setFromMatrixColumn(cam.matrixWorld, 0);
+    cam.position.addScaledVector(_frameR, (lo + hi) / 2 * half * w);
+    cam.updateMatrixWorld();
+  }
   private nearLook(near: number, ty: number): void {
     const cam = this.camera;
     const f = 1 - (1 - BOOK_SIZE) * Math.max(0, Math.min(1, near));

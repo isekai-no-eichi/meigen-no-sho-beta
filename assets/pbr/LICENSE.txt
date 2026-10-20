@@ -1,3 +1,6 @@
 cover-normal-pbr.webp / cover-rough-pbr.webp — ambientCG Leather037 (1K-JPG) の NormalGL / Roughness を既存 cover-normal / cover-rough に重ねて焼いたもの — CC0 — https://ambientcg.com/view?id=Leather037 （ライセンス https://docs.ambientcg.com/license/ ）
 edge-normal.webp / paper-normal.webp — ambientCG Paper005 (1K-JPG) の Displacement / NormalGL から作成 — CC0 — https://ambientcg.com/view?id=Paper005
 作り直し: cd v2 && node scripts/build-assets.mjs pbr <ambientCG の zip を展開したフォルダ（Leather037/ Paper005/ を含む）>
+edge-normal-aged.webp — 2026-10-20 自作（book_open.glb の小口テクスチャと同じ紙の並び＝1枚ずつの溝・折丁の溝・束の出入りから法線化。紙目は ambientCG Paper005 Color を横に引き伸ばして使用）— CC0 素材を含む — https://ambientcg.com/view?id=Paper005
+endpaper-normal.webp — 2026-10-20 ambientCG Paper005 (1K-JPG) の NormalGL を土台に、縁 8% だけ紙の繊維を強めたもの（見返し用）— CC0 — https://ambientcg.com/view?id=Paper005
+（v2/public/book_open.glb 内の小口テクスチャ pageedge-aged も Paper005 Color から作成。作り方は D:\kei-work\2026-10-20_meigen-beta2\book2\scripts\ の make_book2.py / bake_book2.py / make_endpaper_normal.py）
